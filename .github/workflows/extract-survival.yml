@@ -53,6 +53,48 @@ jobs:
           du -h --max-depth=2 extracted | sort -h | tail -n 100 > report/subdirectory-sizes.txt
           df -h . | tee report/disk-after.txt
           head -n 80 report/file-list.tsv
+      - name: Create compact sources and configuration kit
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          from hashlib import sha256
+          from collections import Counter
+          root=Path("extracted")
+          suffixes={".lua",".json",".shapeset",".assetset",".gui",".world",
+                    ".zonesettings",".projectileset",".harvestableset",
+                    ".kinematicset",".sobset",".xml",".combatencounters",
+                    ".tradegroup",".rendersettings",".voxelmeshset",
+                    ".voxelmaterialset",".sobdb",".trashbotpattern"}
+          prefixes=("Survival/Scripts/","Survival/CraftingRecipes/",
+                    "Survival/ScriptJsonFiles/","Survival/ScriptableObjects/",
+                    "Survival/BuilderGuides/","Survival/Nodes/",
+                    "Survival/Tools/","Survival/Dialog/","Survival/Melee/")
+          selected=[]
+          for p in root.rglob("*"):
+              if not p.is_file(): continue
+              rel=p.relative_to(root).as_posix()
+              if p.suffix.lower() in suffixes or rel.startswith(prefixes):
+                  selected.append((rel,p))
+          selected.sort()
+          manifest=[]
+          with ZipFile("survival-sources-config.zip","w",ZIP_DEFLATED,compresslevel=9) as z:
+              for rel,p in selected:
+                  data=p.read_bytes()
+                  z.writestr(rel,data)
+                  manifest.append(f"{sha256(data).hexdigest()}  {len(data)}  {rel}")
+              z.writestr("SOURCE_MANIFEST_SHA256.txt","\\n".join(manifest)+"\\n")
+          print("Selected source/config files:",len(selected))
+          print("Uncompressed size:",sum(p.stat().st_size for _,p in selected))
+          print("Kit size:",Path("survival-sources-config.zip").stat().st_size)
+          PY
+      - name: Upload sources and configuration kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: survival-sources-config
+          path: survival-sources-config.zip
+          retention-days: 7
       - name: Save extraction report
         if: always()
         uses: actions/upload-artifact@v4
