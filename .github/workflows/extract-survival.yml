@@ -1,0 +1,62 @@
+name: Inspect and extract Survival RAR release
+on:
+  push:
+    paths:
+      - .github/workflows/extract-survival.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - name: Download all 9 RAR volumes from this repository release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p volumes report
+          for n in $(seq -w 1 9); do
+            url="https://github.com/Pokateli/Temp/releases/download/Temp/Survival.part${n}.rar"
+            echo "Downloading Survival.part${n}.rar"
+            curl --fail --location --retry 5 --connect-timeout 30 --output "volumes/Survival.part${n}.rar" "$url"
+          done
+          for n in $(seq -w 1 8); do
+            test "$(stat -c%s "volumes/Survival.part${n}.rar")" -eq 471859200
+          done
+          test "$(stat -c%s volumes/Survival.part09.rar)" -eq 411611548
+          sha256sum volumes/*.rar | tee report/volume-sha256.txt
+          df -h . | tee report/disk-before.txt
+      - name: Test and unpack RAR archive
+        shell: bash
+        run: |
+          set -uo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq 7zip
+          7z t volumes/Survival.part01.rar > report/archive-test.txt 2>&1
+          test_result=$?
+          echo "7z test exit: $test_result"
+          mkdir -p extracted
+          7z x -y -oextracted volumes/Survival.part01.rar > report/extraction.txt 2>&1
+          extract_result=$?
+          echo "7z extraction exit: $extract_result" | tee report/extraction-status.txt
+          if (( test_result != 0 || extract_result != 0 )); then
+            tail -n 120 report/archive-test.txt || true
+            tail -n 120 report/extraction.txt || true
+            exit 1
+          fi
+          find extracted -type f -printf '%P\t%s\n' | LC_ALL=C sort > report/file-list.tsv
+          find extracted -type f | wc -l | tee report/file-count.txt
+          du -sh extracted | tee report/total-unpacked-size.txt
+          du -h --max-depth=2 extracted | sort -h | tail -n 100 > report/subdirectory-sizes.txt
+          df -h . | tee report/disk-after.txt
+          head -n 80 report/file-list.tsv
+      - name: Save extraction report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: survival-extraction-report
+          path: report/
+          retention-days: 7
