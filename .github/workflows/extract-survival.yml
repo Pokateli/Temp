@@ -18,12 +18,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p volumes report
-          for n in $(seq -w 1 9); do
+          for n in $(seq -f '%02g' 1 9); do
             url="https://github.com/Pokateli/Temp/releases/download/Temp/Survival.part${n}.rar"
             echo "Downloading Survival.part${n}.rar"
             curl --fail --location --retry 5 --connect-timeout 30 --output "volumes/Survival.part${n}.rar" "$url"
           done
-          for n in $(seq -w 1 8); do
+          for n in $(seq -f '%02g' 1 8); do
             test "$(stat -c%s "volumes/Survival.part${n}.rar")" -eq 471859200
           done
           test "$(stat -c%s volumes/Survival.part09.rar)" -eq 411611548
