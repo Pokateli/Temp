@@ -1,0 +1,43 @@
+name: Tiny11 staged build + ZSTD QCOW2 + real Windows TCG boot
+on:
+  push:
+    branches: [windows-tiny11-zstd-debug-20261029]
+    paths:
+      - '.github/workflows/tiny11-staged.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build-and-boot:
+    runs-on: windows-2022
+    timeout-minutes: 145
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage 1 - Download and SHA256-verify official Microsoft Enterprise ISO
+        shell: pwsh
+        timeout-minutes: 20
+        run: ./tiny11-qcow2-lab/prepare-tiny11-v2.ps1 -Stage Download
+      - name: Stage 2 - Build Tiny11 with bounded progress and pinned upstream
+        shell: pwsh
+        timeout-minutes: 58
+        run: ./tiny11-qcow2-lab/prepare-tiny11-v2.ps1 -Stage Build
+      - name: Stage 3 - Install image in GPT VHDX and compress actual ZSTD QCOW2
+        shell: pwsh
+        timeout-minutes: 40
+        run: ./tiny11-qcow2-lab/apply-tiny11.ps1
+      - name: Stage 4 - Actual Windows first boot under QEMU TCG without KVM
+        shell: pwsh
+        timeout-minutes: 22
+        run: ./tiny11-qcow2-lab/test-tiny11-boot.ps1
+      - name: Always upload logs and screenshots (NO Microsoft ISO or Windows disk)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tiny11-staged-diagnostics
+          path: tiny11-qcow2-logs/
+          retention-days: 14
+          if-no-files-found: warn
