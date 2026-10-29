@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/tiny11-windows-marker-preflight.yml'
       - 'tiny11-qcow2-lab/apply-tiny11-ready.ps1'
+      - 'tiny11-qcow2-lab/finalize-ready.ps1'
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,6 +23,10 @@ jobs:
           $tokens=$null;$issues=$null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $source).Path,[ref]$tokens,[ref]$issues)|Out-Null
           if($issues.Count){$issues|Out-Host;throw "PowerShell source parsing failed"}
+          $tokens=$null;$otherIssues=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tiny11-qcow2-lab/finalize-ready.ps1').Path,[ref]$tokens,[ref]$otherIssues)|Out-Null
+          if($otherIssues.Count){$otherIssues|Out-Host;throw 'Windows first-boot finalizer parser failed'}
+          Write-Host 'PASS first-boot finalizer PowerShell parser'
           $raw=Get-Content $source -Raw
           $pattern="(?s)# A startup marker task.*?\@'\r?\n(?<batch>\@echo off.*?)(?:\r?\n)'\@"
           $match=[regex]::Match($raw,$pattern)
