@@ -1,0 +1,40 @@
+name: Tiny11 WIM-only fast path parser and pinned upstream preflight
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - 'tiny11-qcow2-lab/prepare-tiny11-wim.ps1'
+      - '.github/workflows/tiny11-wim-fast-preflight.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-preflight:
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell syntax and patched pinned builder (no Windows ISO)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $builder='tiny11-qcow2-lab/prepare-tiny11-wim.ps1'
+          $tok=$null;$issues=$null
+          [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $builder).Path,[ref]$tok,[ref]$issues)|Out-Null
+          if($issues.Count){$issues|Out-Host;throw 'WIM builder PowerShell syntax error'}
+          $upstream='https://raw.githubusercontent.com/ntdevlabs/tiny11builder/00e7d8a151a39ccffccab4a267bb81fb3756a01d/tiny11maker.ps1'
+          $body=(Invoke-WebRequest $upstream -ErrorAction Stop).Content
+          $script=Get-Content $builder -Raw
+          $start=$script.IndexOf('    # This is a DISM-ApplyImage disk build')
+          $end=$script.IndexOf('    # Replace an infinite retry loop',$start)
+          if($start -lt 0 -or $end -le $start){throw 'Cannot locate tested selective WIM-only patch block'}
+          $block=$script.Substring($start,$end-$start)
+          Invoke-Expression $block
+          if($body -notmatch 'Copy-Item -LiteralPath "\$DriveLetter\\sources\\install.wim"'){throw 'WIM-only copy not installed'}
+          $early=$body.IndexOf('Tiny11 WIM-only build complete. No boot.wim edits or installer ISO produced.')
+          $boot=$body.IndexOf('Write-Output "Mounting boot image:"')
+          if($early -le 0 -or $boot -le $early){throw 'WIM-only early exit must occur before boot.wim modification'}
+          $tokens=$null;$errors=$null
+          [Management.Automation.Language.Parser]::ParseInput($body,[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|Out-Host;throw 'Patched maker script is not valid PowerShell'}
+          Write-Host 'PASS pinned upstream transforms: install.wim copied alone, boot.wim skipped, WIM-only early exit'
