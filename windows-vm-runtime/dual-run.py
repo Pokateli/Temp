@@ -72,8 +72,13 @@ def main():
             print("Verified",f.name,have[:16]+"...",flush=True)
     qimg=qemu_command("qemu-img",opt.qemu_home)
     info=json.loads(subprocess.check_output(qimg+["info","--output=json",str(disk)],text=True))
+    if info.get("format")!="qcow2":
+        raise SystemExit("Base disk is not QCOW2")
     if info.get("backing-filename"):
         raise SystemExit("Base disk unexpectedly depends on another image")
+    fmtdata=info.get("format-specific",{}).get("data",{})
+    if fmtdata.get("compression-type")!="zstd":
+        raise SystemExit("Base QCOW2 clusters are not configured for Zstandard")
     if int(info.get("virtual-size",0))!=int(meta["virtual_size_bytes"]):
         raise SystemExit("Virtual size mismatch")
     if opt.action=="verify":
