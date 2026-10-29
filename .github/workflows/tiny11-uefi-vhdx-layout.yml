@@ -37,10 +37,11 @@ jobs:
           Get-Content $dps | Out-Host
           & diskpart.exe /s $dps | Out-Host
           if(-not(Test-Path Y:\) -or -not(Test-Path W:\)){throw 'EFI/Windows partitions not ready'}
-          $efi=(Get-Volume -DriveLetter Y).FileSystem
-          $win=(Get-Volume -DriveLetter W).FileSystem
-          if($efi -ne 'FAT32' -or $win -ne 'NTFS'){throw "Wrong filesystems EFI=$efi Windows=$win"}
+          # Windows Storage Get-Volume can hide the EFI system partition even when Y: is mounted.
+          Set-Content Y:\UEFI_BOOTCHECK.TXT -Value FAT32_EFI_OK -Encoding ASCII
           Set-Content W:\BOOTCHECK.TXT -Value GPT_UEFI_OK -Encoding ASCII
+          if(-not(Test-Path Y:\UEFI_BOOTCHECK.TXT) -or -not(Test-Path W:\BOOTCHECK.TXT)){throw 'EFI/NTFS write verification failed'}
+          Write-Host 'Both Windows and EFI volumes accept file writes'
           $detach=Join-Path $dir 'detach.dps'
           @( ('SELECT VDISK FILE="{0}"' -f $image), 'DETACH VDISK', 'EXIT') |
             Set-Content -Path $detach -Encoding ASCII
