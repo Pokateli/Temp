@@ -23,15 +23,29 @@ if [ -z "${QEMU_HOME:-}" ]; then
     fi
   done
   if [ -z "${QEMU_HOME:-}" ]; then
+    # Prefer the compact GitHub Actions artifact rather than fetching a whole
+    # Debian guest disk. Existing portable kits use two known directory names.
+    portable_tar=/mnt/data/tiny11-qemu-runtime-linux-amd64.tar.gz
     portable_zip=/mnt/data/debian13-qemu-tcg-bundle.zip
-    if [ ! -f "$portable_zip" ]; then
-      echo "Portable QEMU kit missing: $portable_zip. Set QEMU_HOME to an extracted compatible portable kit." >&2
+    root=/mnt/data/tiny11-portable-qemu
+    mkdir -p "$root"
+    if [ -f "$portable_tar" ]; then
+      echo "Extracting compact Tiny11 QEMU TCG runtime (no OS disk)"
+      tar -xzf "$portable_tar" -C "$root"
+    elif [ -f "$portable_zip" ]; then
+      echo "Extracting legacy Debian13 QEMU kit (no system installation)"
+      unzip -p "$portable_zip" debian13-qemu-bundle.tar.gz | tar -xz -C "$root"
+    else
+      echo "No QEMU runtime. Put tiny11-qemu-runtime-linux-amd64.tar.gz in /mnt/data or set QEMU_HOME." >&2
       exit 2
     fi
-    echo "Preparing portable QEMU TCG from existing Debian13 kit (no system installation)"
-    mkdir -p /mnt/data/tiny11-portable-qemu
-    unzip -p "$portable_zip" debian13-qemu-bundle.tar.gz | tar -xz -C /mnt/data/tiny11-portable-qemu
-    QEMU_HOME=/mnt/data/tiny11-portable-qemu/debian13-qemu-bundle
+    for candidate in "$root/tiny11-qemu-runtime-linux-amd64" "$root/debian13-chatgpt-vm" "$root/debian13-qemu-bundle"; do
+      if [ -x "$candidate/bin/qemu-img" ] && [ -x "$candidate/bin/qemu-system-x86_64" ]; then
+        QEMU_HOME="$candidate"
+        break
+      fi
+    done
+    [ -n "${QEMU_HOME:-}" ] || { echo "Extracted QEMU kit has no expected binaries" >&2; exit 2; }
   fi
 fi
 export QEMU_HOME
