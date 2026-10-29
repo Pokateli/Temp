@@ -50,6 +50,23 @@ try {
   & dism.exe /Apply-Image "/ImageFile:$image" /Index:1 /ApplyDir:W:\ /CheckIntegrity |
     Tee-Object -FilePath (Join-Path $report 'apply-image.txt') | Out-Host
   if($LASTEXITCODE -ne 0){throw "DISM Apply-Image failed: $LASTEXITCODE"}
+  # SetupComplete is expected to run as SYSTEM when initial Windows setup finalizes.
+  # QEMU host provides TINY11_PROBE.TXT on its FAT virtual exchange disk.
+  $hooks='W:\Windows\Setup\Scripts'
+  New-Item -ItemType Directory -Force -Path $hooks | Out-Null
+  @'
+@echo off
+echo SETUP_COMPLETE_STARTED > %SystemRoot%\Temp\tiny11_setup_complete.txt
+for %%D in (D E F G H I J K L M N O P Q R S T U V X Y Z) do (
+  if exist %%D:\TINY11_PROBE.TXT (
+    echo TINY11_READY>%%D:\TINY11_READY.TXT
+    ver >>%%D:\TINY11_READY.TXT
+    echo MACHINE=%COMPUTERNAME%>>%%D:\TINY11_READY.TXT
+  )
+)
+exit /b 0
+'@ | Set-Content -LiteralPath (Join-Path $hooks 'SetupComplete.cmd') -Encoding ASCII
+  Write-Host 'Created Windows guest-side boot marker hook (SetupComplete)'
   & bcdboot.exe W:\Windows /s Y: /f UEFI /l en-US | Out-Host
   if($LASTEXITCODE -ne 0){throw "BCDBoot failed: $LASTEXITCODE"}
   (Get-Item 'W:\Windows\System32\ntoskrnl.exe').VersionInfo.FileVersion |
@@ -67,6 +84,9 @@ try {
 Write-Host 'Converting Windows VHDX to compressed QCOW2 with real zstd compressed clusters'
 & $qemuImg convert -p -c -f vhdx -O qcow2 -o 'compat=1.1,compression_type=zstd' $vhdx $qcow
 if($LASTEXITCODE -ne 0){throw "qemu-img zstd convert failed: $LASTEXITCODE"}
+Write-Host 'Verifying compressed Windows disk is byte-identical to source VHDX'
+& $qemuImg compare -f vhdx -F qcow2 $vhdx $qcow
+if($LASTEXITCODE -ne 0){throw "VHDX and compressed QCOW2 differ"}
 & $qemuImg info --output=json $qcow |
   Set-Content (Join-Path $report 'tiny11-qcow2-info.json')
 if($LASTEXITCODE -ne 0){throw 'qemu-img info failed'}
