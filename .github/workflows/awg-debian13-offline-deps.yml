@@ -1,0 +1,30 @@
+name: AWG Manager Debian 13 offline runtime dependencies
+on:
+  push:
+    paths:
+      - .github/workflows/awg-debian13-offline-deps.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Download verified Debian 13 runtime packages with APT
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$PWD/offline/debs"
+          docker run --rm -v "$PWD/offline/debs:/out" debian:13-slim bash -euc '
+            apt-get update
+            apt-get -y --download-only install ca-certificates curl ethtool gnupg iproute2 iputils-ping lftp libsqlite3-0 nftables procps qrencode unzip zip
+            cp -v /var/cache/apt/archives/*.deb /out/
+            (cd /out && sha256sum *.deb > SHA256SUMS)
+          '
+      - name: Upload offline dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: awg-debian13-amd64-offline-debs
+          path: offline/debs/
+          retention-days: 30
+          compression-level: 0
