@@ -1,3 +1,64 @@
+# 2026-10-30 — FIRST SUCCESSFUL READY TINY11 QCOW2, RECOVERED IN CHATGPT
+
+**Ready Windows image is confirmed built and published** in
+[GitHub Actions 40928819947](https://github.com/Pokateli/Temp/actions/runs/40928819947)
+(`ubuntu-kvm` job success). The workflow reused the DISM-installed Windows
+stage from run 40908895996, finalized the first KVM OOBE/login with clean
+shutdown, verified second installed-Windows startup, and published 20 public
+`tiny11-ready-public-shard-NNN` artifacts plus
+`tiny11-ready-public-index` and `tiny11-kvm-guest-proof`.
+
+**Exact verified content**:
+- Disk: `tiny11-ready-zstd.qcow2`, 8,021,803,008 bytes physical, 64 GiB virtual,
+  `qcow2` compression-type `zstd`, **no backing file**.
+- Disk SHA-256:
+  `9d6b897b3ba5326b6de380b8ef48898c5c9f561b65e4b44507eb713e4300d402`.
+- The 20 transfer parts span 8,026,009,600 TAR bytes; individually SHA256 verified.
+- Exact six member files: `tiny11-ready-zstd.qcow2`, `OVMF_CODE.fd`,
+  `OVMF_VARS.fd`, `tiny11-ready-manifest.json`, `ready-credentials.txt`,
+  `SHA256SUMS`.
+- GitHub final guest proof `probe-result.json`: `boot_confirmed=true`,
+  `fat_marker_confirmed=true`, `serial_marker_confirmed=true`,
+  `probe_overlay_discarded=true`, `acpi_shutdown_requested=true`,
+  `guest_shutdown_clean=false`, `host_terminated=true`.
+  The second-boot guest was forcibly stopped after confirming boot; its
+  disposable overlay was **not merged** into the clean ready base.
+
+**ChatGPT sandbox extraction**:
+- All 20 GitHub artifacts were downloaded to active session,
+  ZIP container removed after extraction, parts preserved under
+  `/mnt/data/tiny11-ready-public-parts/part-000.bin` ... `part-019.bin`.
+- Reconstructed exact ready kit under `/mnt/data/tiny11-ready/`, all
+  six source members SHA256 verified against index. `qemu-img check -f qcow2`
+  returned `No errors were found on the image.`
+- Portable QEMU 10.0.13 extracted to
+  `/mnt/data/tiny11-local-qemu/debian13-chatgpt-vm`.
+- Launched QEMU **TCG** in this sandbox with separate overlay
+  `tiny11-sandbox-session.qcow2` and copy of UEFI VARS. First serial
+  and VGA frames show QEMU UEFI starting the installed Windows Boot Manager;
+  later VGA showed `Getting devices ready`. At the time of this report,
+  this **does not yet prove a fully loaded Windows desktop in ChatGPT TCG**.
+
+**Bug fixed**: earlier KVM shard-transfer run 40922779780 failed solely because
+it verified restored stage against `STAGE-SHA256SUMS`, which the
+`stage` shard FILESET intentionally omitted. The stage pack/unpack itself
+had correctly verified the constituent files. This redundant check has been
+removed from `.github/workflows/tiny11-ready-kvm-public.yml`.
+After that workflow edit, a new full build triggered; it is not needed to
+establish validity of ready run 40928819947.
+
+**ChatGPT compact QEMU bootstrapping** was also updated to detect the
+`debian13-chatgpt-vm` root of the archived QEMU runtime and autoextract
+`/mnt/data/tiny11-qemu-runtime-linux-amd64.tar.gz` when available.
+
+**NEXT**: capture a guest desktop or boot marker from the ChatGPT TCG run,
+then integrate the already verified ready kit into VM-Fabric lifecycle and
+persist its 20 shards somewhere longer-lived than ephemeral Actions artifacts.
+Do not claim TCG GUI desktop boot until verified. This project's public Temp
+artifacts were explicitly approved by the user for temporary development.
+
+---
+
 ## 2026-10-29 — Root cause of large GitHub artifact transfer and fix
 
 **Confirmed real failure** (not Node warning): [KVM run 40906341119, ubuntu job 123600680280](https://github.com/Pokateli/Temp/actions/runs/40906341119/job/123600680280) first transferred `tiny11-kvm-stage-plain`, one 7,906,067,331 byte artifact. The `actions/download-artifact@v4` output included Node `DEP0005 Buffer()` warning, but later SHA256 stage validation failed: `tiny11-zstd.qcow2: FAILED`, `ready-credentials.txt: No such file or directory`. Therefore the *reassembled/extracted 7.9GB stage was invalid*, regardless of the incidental deprecation warning. No guest Windows KVM OOBE was attempted on that corrupt stage.
