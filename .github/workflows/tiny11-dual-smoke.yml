@@ -2,7 +2,9 @@ name: "Dual Tiny11 runtime - integrity, encrypted transfer, QEMU TCG smoke"
 on:
   push:
     branches: [windows-tiny11-dual-ready-20261029]
-    paths: ['.github/workflows/tiny11-dual-smoke.yml']
+    paths:
+      - '.github/workflows/tiny11-dual-smoke.yml'
+      - 'windows-vm-runtime/**'
   workflow_dispatch:
 permissions:
   contents: read
