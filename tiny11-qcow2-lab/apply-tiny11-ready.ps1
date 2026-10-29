@@ -110,7 +110,7 @@ param([ValidateSet("FirstReady","SecondBoot")][string]$Event)
 $ErrorActionPreference="Stop"
 $com=$null
 try {
-  $com=New-Object System.IO.Ports.SerialPort("COM1",115200,"None",8,"One")
+  $com=[System.IO.Ports.SerialPort]::new("COM1",115200,[System.IO.Ports.Parity]::None,8,[System.IO.Ports.StopBits]::One)
   $com.WriteTimeout=3000
   $com.Open()
   if($Event -eq "FirstReady") {
