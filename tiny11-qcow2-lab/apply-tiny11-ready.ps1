@@ -124,6 +124,8 @@ setlocal EnableExtensions
 if not exist "%SystemRoot%\Temp" mkdir "%SystemRoot%\Temp"
 echo PREPARING_WINDOWS_READY_DISK>"%SystemRoot%\Temp\Tiny11FirstReady.log"
 schtasks.exe /Create /F /SC ONSTART /RU SYSTEM /TN "Tiny11-Ready-Probe" /TR "C:\Windows\Setup\Scripts\Tiny11BootProbe.cmd" >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
+if errorlevel 1 exit /b 1
+powercfg.exe /h off >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
 for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
  if exist %%D:\TINY11_PROBE.TXT (
    echo TINY11_FIRST_LOGON_READY>%%D:\TINY11_FIRST_LOGON_READY.TXT
