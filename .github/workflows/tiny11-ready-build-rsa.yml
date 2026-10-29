@@ -47,7 +47,7 @@ jobs:
         run: ./tiny11-qcow2-lab/apply-tiny11-ready.ps1
       - name: 4. Boot Windows ONCE, finish OOBE, shutdown, freeze standalone ZSTD ready QCOW2
         shell: pwsh
-        timeout-minutes: 60
+        timeout-minutes: 95
         run: ./tiny11-qcow2-lab/finalize-ready.ps1
       - name: 5. Verify prepared ready manifest and next-boot behavior on GitHub QEMU TCG
         shell: pwsh
