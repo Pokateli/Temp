@@ -85,6 +85,16 @@ try {
   throw 'Windows failed to power off cleanly. Disk capture aborted.'
  }
 }
+# QEMU's writable virtual FAT backend may publish the guest file on final
+# filesystem refresh or only after process exit. Check again after clean exit.
+if((-not $seenReady) -and (Test-Path $marker)){
+ $data=Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue
+ if($data -and $data.Contains('TINY11_FIRST_LOGON_READY') -and $data.Contains('INSTALLED_AND_OOBE_FINISHED')){
+  $seenReady=$true
+  $data|Set-Content (Join-Path $logs 'windows-first-logon-proof.txt')
+  Write-Host 'Windows first login marker detected after clean QEMU shutdown'
+ }
+}
 if(-not $seenReady){throw "Windows first login marker missing; QEMU exit=$codeExit"}
 if($codeExit -ne 0){throw "QEMU exit not clean: $codeExit"}
 Write-Host 'PASS Windows OOBE finished, local vmuser logged in, Windows powered off cleanly'
