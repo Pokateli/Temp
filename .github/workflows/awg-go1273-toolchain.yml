@@ -1,0 +1,36 @@
+name: AWG Manager offline Go 1.27.3 toolchain (amd64)
+on:
+  push:
+    paths:
+      - .github/workflows/awg-go1273-toolchain.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install pinned Go compiler
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          check-latest: false
+      - name: Package toolchain with checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export GOTOOLCHAIN=local
+          test "$(go version | awk '{print $3}')" = go1.27.3
+          goroot="$(go env GOROOT)"
+          test -x "$goroot/bin/go"
+          mkdir -p output
+          tar -C "$goroot" -czf output/go1.27.3-linux-amd64-runtime.tar.gz .
+          (cd output && sha256sum go1.27.3-linux-amd64-runtime.tar.gz > SHA256SUMS)
+      - name: Upload toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: awg-go1273-linux-amd64
+          path: output/
+          compression-level: 0
+          retention-days: 30
