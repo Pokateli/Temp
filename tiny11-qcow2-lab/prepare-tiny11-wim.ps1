@@ -53,14 +53,28 @@ try {
     $body=$body.Replace('Read-Host "Please enter the image index"','1')
     $body=$body.Replace('Read-Host "Please enter the drive letter for the Windows 11 image"','$ISO')
     $body=$body.Replace('Read-Host "Press Enter to continue"','"noninteractive"')
-    # WIM-only path: we need a bootable Windows disk, not a second installer ISO.
-    # Tiny11 upstream has completed all DISM editing before "Creating ISO image...".
-    if(-not $body.Contains('Write-Output "Creating ISO image..."')){throw 'Upstream ISO generation boundary not found'}
-    $body=$body.Replace('Write-Output "Creating ISO image..."', @'
+    # This is a DISM-ApplyImage disk build: boot.wim and installer ISO are
+    # never consumed. Copy only the source install.wim instead of the whole
+    # 8-GB ISO contents (boot.wim, setup.exe, etc).
+    $copyFrom='Copy-Item -Path "$DriveLetter\*" -Destination "$ScratchDisk\tiny11" -Recurse -Force | Out-Null'
+    $copyTo='Copy-Item -LiteralPath "$DriveLetter\sources\install.wim" -Destination "$ScratchDisk\tiny11\sources\install.wim" -Force | Out-Null'
+    if(-not $body.Contains($copyFrom)){throw 'Pinned upstream full-ISO copy boundary changed'}
+    $body=$body.Replace($copyFrom,$copyTo)
+
+    # The upstream script exports/compacts install.wim then proceeds to alter
+    # boot.wim. Stop exactly after the completed exported WIM, BEFORE any
+    # modifications to the unnecessary installer boot image.
+    $finishAt='Write-Output "Windows image completed. Continuing with boot.wim."'
+    if(-not $body.Contains($finishAt)){throw 'Pinned upstream install-WIM completion boundary changed'}
+    $body=$body.Replace($finishAt, @'
 Copy-Item -LiteralPath "$ScratchDisk\tiny11\sources\install.wim" -Destination "$PSScriptRoot\tiny11-install.wim" -Force
-Write-Output "Tiny11 WIM-only build completed (no installer ISO required)."
+Write-Output "Tiny11 WIM-only build complete. No boot.wim edits or installer ISO produced."
 exit 0
 '@)
+    # Reject accidental fallback to the previous (wasteful) boot.wim/ISO route.
+    if(-not $body.Contains('Tiny11 WIM-only build complete. No boot.wim edits or installer ISO produced.')){
+        throw 'WIM-only exit injection was not applied'
+    }
 
     # Replace an infinite retry loop with a deterministic one-time check.
     $body=$body.Replace('while ($ImagesIndex -notcontains $index)', 'if ($ImagesIndex -notcontains $index)')
