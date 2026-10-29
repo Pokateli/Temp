@@ -1,0 +1,24 @@
+name: Microsoft ISO CDN 64 MiB download speed probe
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths: ['.github/workflows/tiny11-iso-download-speed.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2022
+    timeout-minutes: 7
+    steps:
+      - name: Download first 64 MiB from Microsoft ISO CDN with a 120s upper bound
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://go.microsoft.com/fwlink/?LinkId=2382600&clcid=0x409&country=us&culture=en-us'
+          $out=Join-Path $env:RUNNER_TEMP 'iso64m.bin'
+          & curl.exe --fail --location --retry 1 --connect-timeout 15 --max-time 120 --range 0-67108863 --silent --show-error --output $out --write-out 'status=%{http_code} size=%{size_download} bytes speed=%{speed_download} bytes_per_second duration=%{time_total} seconds\n' $url
+          if($LASTEXITCODE -ne 0){throw 'Official Microsoft CDN range download failed'}
+          $length=(Get-Item $out).Length
+          Write-Host "Downloaded first bytes: $length"
+          if($length -lt 10000000){throw "ISO CDN delivered less than 10MB"}
