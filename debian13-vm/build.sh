@@ -38,11 +38,16 @@ docker run --rm --platform linux/amd64 \
     curl -fLS --retry 5 --retry-delay 3 "$base/SHA512SUMS" -o /tmp/SHA512SUMS
     expected="$(awk '\''$2 ~ /(^|\/)debian-13-nocloud-amd64\.qcow2$/ {print $1; exit}'\'' /tmp/SHA512SUMS)"
     actual="$(sha512sum /out/debian13.qcow2 | awk '\''{print $1}'\'')"
+    echo "Checksum expected: $expected"; echo "Checksum actual: $actual"
     [ -n "$expected" ] && [ "$expected" = "$actual" ] || {
       echo "Debian image SHA512 verification FAILED" >&2; exit 1;
     }
     printf "%s  debian13.qcow2\n" "$actual" > /out/DEBIAN_IMAGE_SHA512SUMS
-    test -f /out/share/qemu/bios-256k.bin -o -f /out/share/qemu/bios.bin
+    echo "Bundled firmware entries:"; ls -l /out/share/qemu/ | head -n 30
+    if [ ! -e /out/share/qemu/bios-256k.bin ] && [ ! -e /out/share/qemu/bios.bin ]; then
+      echo "Copy SeaBIOS firmware from Debian package"
+      cp -aL /usr/share/seabios/. /out/share/qemu/
+    fi
     /out/lib/ld-linux-x86-64.so.2 --library-path /out/lib \
       /out/bin/qemu-system-x86_64 --version
     /out/lib/ld-linux-x86-64.so.2 --library-path /out/lib \
