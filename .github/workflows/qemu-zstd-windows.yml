@@ -1,0 +1,48 @@
+name: Windows QEMU ZSTD capability preflight
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths: ['.github/workflows/qemu-zstd-windows.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Install same Windows QEMU used by Tiny11 builder
+        shell: pwsh
+        run: |
+          choco install qemu --version=2026.8.11 --yes --no-progress --limit-output
+          if ($LASTEXITCODE -ne 0) { throw "QEMU installation failed" }
+          & 'C:\Program Files\qemu\qemu-img.exe' --version
+      - name: Test ZSTD QCOW2 real compressed extents on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'zstd-probe'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $raw=Join-Path $dir 'data.raw'
+          $qcow=Join-Path $dir 'data.qcow2'
+          @'
+          from pathlib import Path
+          import os,sys
+          p=Path(sys.argv[1])
+          with p.open('wb') as f:
+              for i in range(64):
+                  f.write((b'A'*1024*1024) if i%16 else os.urandom(1024*1024))
+          print('Input raw bytes',p.stat().st_size)
+          '@ | python - $raw
+          if ($LASTEXITCODE -ne 0) { throw "Raw generator failure" }
+          $img='C:\Program Files\qemu\qemu-img.exe'
+          & $img convert -c -f raw -O qcow2 -o 'compat=1.1,compression_type=zstd' $raw $qcow
+          if ($LASTEXITCODE -ne 0) { throw "Windows qemu-img lacks ZSTD support" }
+          $info=& $img info --output=json $qcow | ConvertFrom-Json
+          $map=& $img map --output=json $qcow | ConvertFrom-Json
+          & $img compare -f raw -F qcow2 $raw $qcow
+          if ($LASTEXITCODE -ne 0) { throw "Data mismatch after Windows ZSTD convert" }
+          $compressed=@($map|Where-Object {$_.compressed -eq $true}).Count
+          if($compressed -le 0) {throw "No compressed QCOW2 extents"}
+          if(($info | ConvertTo-Json -Depth 9) -notmatch 'zstd') {throw "No zstd in QCOW2 metadata"}
+          Write-Host "PASS: Windows qemu-img zstd, compressed extents=$compressed, bytes=$( (Get-Item $qcow).Length )"
