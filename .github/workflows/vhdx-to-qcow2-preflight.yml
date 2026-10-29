@@ -1,0 +1,58 @@
+name: Validate VHDX to compressed QCOW2 on Windows
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths: ['.github/workflows/vhdx-to-qcow2-preflight.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Build VHDX, format, write test contents, and convert with ZSTD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & choco install qemu --version=2026.8.11 --yes --no-progress --limit-output
+          if($LASTEXITCODE -ne 0){throw "QEMU install failed"}
+          $img='C:\Program Files\qemu\qemu-img.exe'
+          $root=Join-Path $env:RUNNER_TEMP 'vhdx-qcow2-check'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $vhdx=Join-Path $root 'probe.vhdx'
+          $qcow=Join-Path $root 'probe.qcow2'
+          if(Get-Volume -DriveLetter R -ErrorAction SilentlyContinue){throw "R drive occupied"}
+          $dps=Join-Path $root 'create.dps'
+          @(
+            'create vdisk file="'+$vhdx+'" maximum=1024 type=expandable',
+            'select vdisk file="'+$vhdx+'"',
+            'attach vdisk',
+            'convert gpt',
+            'create partition primary',
+            'format quick fs=ntfs label="VHDXTEST"',
+            'assign letter=R',
+            'exit'
+          )|Set-Content $dps -Encoding ASCII
+          & diskpart.exe /s $dps | Out-Host
+          if($LASTEXITCODE -ne 0 -or -not(Test-Path 'R:\')){throw "DiskPart did not attach usable VHDX"}
+          try {
+            [System.IO.File]::WriteAllBytes('R:\PAYLOAD.BIN', (New-Object byte[] (32MB)))
+            Set-Content 'R:\READY.TXT' -Value 'DISKPART_OK' -Encoding ASCII
+            if(-not(Test-Path 'R:\PAYLOAD.BIN')){throw "Payload not written"}
+          } finally {
+            $detach=Join-Path $root 'detach.dps'
+            @('select vdisk file="'+$vhdx+'"','detach vdisk','exit')|Set-Content $detach -Encoding ASCII
+            & diskpart.exe /s $detach | Out-Host
+          }
+          if(-not(Test-Path $vhdx)){throw "VHDX missing"}
+          & $img convert -c -f vhdx -O qcow2 -o 'compat=1.1,compression_type=zstd' $vhdx $qcow
+          if($LASTEXITCODE -ne 0){throw "Conversion failed"}
+          $info=(& $img info --output=json $qcow | Out-String)|ConvertFrom-Json
+          $maps=(& $img map --output=json $qcow | Out-String)|ConvertFrom-Json
+          & $img compare -f vhdx -F qcow2 $vhdx $qcow
+          if($LASTEXITCODE -ne 0){throw "VHDX-QCOW2 compare failed"}
+          $compressed=@($maps|Where-Object {$_.compressed -eq $true}).Count
+          if($compressed -eq 0){throw "No compressed clusters"}
+          if(($info|ConvertTo-Json -Depth 10) -notmatch 'zstd'){throw "No zstd metadata"}
+          Write-Host "PASS: VHDX to ZSTD-QCOW2 compressed extents=$compressed, source $((Get-Item $vhdx).Length) bytes, result $((Get-Item $qcow).Length) bytes"
