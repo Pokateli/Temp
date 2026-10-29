@@ -7,13 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: "Ready-disk BUILD run ID containing encrypted tiny11-ready-encrypted-v1 artifact"
+        description: 'Build run containing encrypted tiny11-ready-encrypted-v1 artifact'
         required: true
         type: string
       vm_ram_mib:
-        description: "RAM MiB (default 2560)"
+        description: 'RAM in MiB, default 2560'
         required: false
-        default: "2560"
+        default: '2560'
         type: string
 permissions:
   contents: read
@@ -27,50 +27,49 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download encrypted ready disk built earlier (NOT a Windows installer)
+      - name: Download encrypted prepared Windows disk artifact
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $id='${{ inputs.source_run_id }}'
           if([string]::IsNullOrWhiteSpace($id)){
-            $config='windows-vm-runtime/github-run-request.json'
-            if(-not(Test-Path $config)){throw 'No manual source_run_id and no GitHub push request file'}
-            $request=Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
-            $id=[string]$request.source_run_id
+            $request='windows-vm-runtime/github-run-request.json'
+            if(-not(Test-Path $request)){throw 'Specify source_run_id in manual workflow, or commit a github-run-request.json file to trigger via push'}
+            $id=[string](Get-Content -LiteralPath $request -Raw | ConvertFrom-Json).source_run_id
           }
-          if($id -notmatch '^[0-9]{7,20}
-          $target=Join-Path $env:RUNNER_TEMP 'tiny11-ready-encrypted'
-          New-Item -ItemType Directory -Force $target|Out-Null
-          & gh run download $id --repo Pokateli/Temp --name tiny11-ready-encrypted-v1 --dir $target
-          if($LASTEXITCODE -ne 0){throw 'Cannot download encrypted ready disk; ensure the build had TINY11_ARCHIVE_PASSPHRASE configured'}
-      - name: Decrypt and verify Windows ready QCOW2 with restricted secret
+          if($id -notmatch '^[0-9]{7,20}$'){throw 'Invalid build run ID'}
+          $dest=Join-Path $env:RUNNER_TEMP 'tiny11-ready-encrypted'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          & gh run download $id --repo Pokateli/Temp --name tiny11-ready-encrypted-v1 --dir $dest
+          if($LASTEXITCODE -ne 0){throw 'Encrypted ready Windows artifact unavailable. Verify build succeeded and the GitHub repository secret was set.'}
+      - name: Decrypt and authenticate preinstalled disk
         shell: pwsh
         env:
           TINY11_ARCHIVE_PASSPHRASE: ${{ secrets.TINY11_ARCHIVE_PASSPHRASE }}
         run: |
           $ErrorActionPreference='Stop'
-          if([string]::IsNullOrEmpty($env:TINY11_ARCHIVE_PASSPHRASE)){throw 'Set GitHub secret TINY11_ARCHIVE_PASSPHRASE to decrypt'}
+          if([string]::IsNullOrEmpty($env:TINY11_ARCHIVE_PASSPHRASE)){throw 'TINY11_ARCHIVE_PASSPHRASE repository secret is missing'}
           python -m pip install --disable-pip-version-check 'cryptography>=44,<48' --quiet
-          if($LASTEXITCODE -ne 0){throw 'Could not load AES-GCM dependencies'}
-          $inputDir=Join-Path $env:RUNNER_TEMP 'tiny11-ready-encrypted'
-          $target=Join-Path $env:RUNNER_TEMP 'tiny11-ready'
-          python windows-vm-runtime/secure-bundle.py decrypt $inputDir $target
-          if($LASTEXITCODE -ne 0){throw 'Windows ready image decrypt/authentication failed'}
-      - name: Boot prepared Windows 11 via QEMU TCG without installation or network
+          if($LASTEXITCODE -ne 0){throw 'cryptography installation failed'}
+          $src=Join-Path $env:RUNNER_TEMP 'tiny11-ready-encrypted'
+          $dst=Join-Path $env:RUNNER_TEMP 'tiny11-ready'
+          python windows-vm-runtime/secure-bundle.py decrypt $src $dst
+          if($LASTEXITCODE -ne 0){throw 'Authenticated decryption failed'}
+      - name: Boot Windows from preinstalled ZSTD QCOW2 and verify guest startup
         shell: pwsh
         timeout-minutes: 28
         run: |
           $ErrorActionPreference='Stop'
           & choco install qemu --version=2026.8.11 --yes --no-progress --limit-output
-          if($LASTEXITCODE -ne 0){throw 'QEMU install failed'}
+          if($LASTEXITCODE -ne 0){throw 'QEMU installation failed'}
           $target=Join-Path $env:RUNNER_TEMP 'tiny11-ready'
           python windows-vm-runtime/dual-run.py verify --vm-dir $target
-          if($LASTEXITCODE -ne 0){throw 'Preinstalled image integrity failure'}
+          if($LASTEXITCODE -ne 0){throw 'Preinstalled disk integrity check failed'}
           $ram='${{ inputs.vm_ram_mib }}'
           if($ram -notmatch '^[0-9]{4,5}$'){$ram='2560'}
           python windows-vm-runtime/dual-run.py probe --vm-dir $target --ram $ram --headless --seconds 1200
-          if($LASTEXITCODE -ne 0){throw 'Previously installed Windows did not emit guest-ready marker'}
-      - name: Upload run logs, never Windows images or credentials
+          if($LASTEXITCODE -ne 0){throw 'Real Windows guest ready marker not observed'}
+      - name: Upload diagnostics only; never Windows OS bytes or credentials
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -79,48 +78,5 @@ jobs:
             ${{ runner.temp }}/tiny11-ready/probe-result.json
             ${{ runner.temp }}/tiny11-ready/qemu-probe.log
             ${{ runner.temp }}/tiny11-ready/qemu-serial.log
-          if-no-files-found: warn
           retention-days: 14
-){throw 'Invalid source_run_id; supply a completed build artifact run ID'}
-          $target=Join-Path $env:RUNNER_TEMP 'tiny11-ready-encrypted'
-          New-Item -ItemType Directory -Force $target|Out-Null
-          & gh run download $id --repo Pokateli/Temp --name tiny11-ready-encrypted-v1 --dir $target
-          if($LASTEXITCODE -ne 0){throw 'Cannot download encrypted ready disk; ensure the build had TINY11_ARCHIVE_PASSPHRASE configured'}
-      - name: Decrypt and verify Windows ready QCOW2 with restricted secret
-        shell: pwsh
-        env:
-          TINY11_ARCHIVE_PASSPHRASE: ${{ secrets.TINY11_ARCHIVE_PASSPHRASE }}
-        run: |
-          $ErrorActionPreference='Stop'
-          if([string]::IsNullOrEmpty($env:TINY11_ARCHIVE_PASSPHRASE)){throw 'Set GitHub secret TINY11_ARCHIVE_PASSPHRASE to decrypt'}
-          python -m pip install --disable-pip-version-check 'cryptography>=44,<48' --quiet
-          if($LASTEXITCODE -ne 0){throw 'Could not load AES-GCM dependencies'}
-          $inputDir=Join-Path $env:RUNNER_TEMP 'tiny11-ready-encrypted'
-          $target=Join-Path $env:RUNNER_TEMP 'tiny11-ready'
-          python windows-vm-runtime/secure-bundle.py decrypt $inputDir $target
-          if($LASTEXITCODE -ne 0){throw 'Windows ready image decrypt/authentication failed'}
-      - name: Boot prepared Windows 11 via QEMU TCG without installation or network
-        shell: pwsh
-        timeout-minutes: 28
-        run: |
-          $ErrorActionPreference='Stop'
-          & choco install qemu --version=2026.8.11 --yes --no-progress --limit-output
-          if($LASTEXITCODE -ne 0){throw 'QEMU install failed'}
-          $target=Join-Path $env:RUNNER_TEMP 'tiny11-ready'
-          python windows-vm-runtime/dual-run.py verify --vm-dir $target
-          if($LASTEXITCODE -ne 0){throw 'Preinstalled image integrity failure'}
-          $ram='${{ inputs.vm_ram_mib }}'
-          if($ram -notmatch '^[0-9]{4,5}$'){$ram='2560'}
-          python windows-vm-runtime/dual-run.py probe --vm-dir $target --ram $ram --headless --seconds 1200
-          if($LASTEXITCODE -ne 0){throw 'Previously installed Windows did not emit guest-ready marker'}
-      - name: Upload run logs, never Windows images or credentials
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tiny11-github-dual-run-logs
-          path: |
-            ${{ runner.temp }}/tiny11-ready/probe-result.json
-            ${{ runner.temp }}/tiny11-ready/qemu-probe.log
-            ${{ runner.temp }}/tiny11-ready/qemu-serial.log
           if-no-files-found: warn
-          retention-days: 14
