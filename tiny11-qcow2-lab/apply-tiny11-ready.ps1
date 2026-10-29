@@ -114,6 +114,7 @@ for /L %%N in (1,1,40) do (
    echo TINY11_INSTALLED_READY>%%D:\TINY11_INSTALLED_READY.TXT
    ver >>%%D:\TINY11_INSTALLED_READY.TXT
    echo COMPUTER=%COMPUTERNAME%>>%%D:\TINY11_INSTALLED_READY.TXT
+   dir %%D:\ >nul 2>&1
    exit /b 0
   )
  )
@@ -136,6 +137,7 @@ for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
    ver >>%%D:\TINY11_FIRST_LOGON_READY.TXT
    echo USER=%USERNAME%>>%%D:\TINY11_FIRST_LOGON_READY.TXT
    echo INSTALLED_AND_OOBE_FINISHED>>%%D:\TINY11_FIRST_LOGON_READY.TXT
+   dir %%D:\ >nul 2>&1
  )
 )
 del /f /q "%SystemRoot%\Panther\Unattend\Unattend.xml" >nul 2>&1
