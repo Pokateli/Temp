@@ -1,3 +1,7 @@
+Additional VM control helper: `windows-vm-runtime/vm-control.py`
+supports local QEMU HMP status/screenshot/ACPI shutdown for a running VM;
+the synthetic dual-QEMU workflow validates its Python syntax.
+
 ## 2026-10-30 — VERIFIED READY TINY11 IMAGE PUBLISHED
 
 **SUCCESS** [GitHub Actions run 40928819947](https://github.com/Pokateli/Temp/actions/runs/40928819947) completed with conclusion `success`. This is the first publicly uploaded preinstalled Tiny11 VM kit ready for ChatGPT/VM-Fabric (not a mere synthetic test). Source was a verified DISM-applied Windows evaluation install-stage image from run 40908895996.
@@ -50,9 +54,15 @@ shutdown, verified second installed-Windows startup, and published 20 public
   `/mnt/data/tiny11-local-qemu/debian13-chatgpt-vm`.
 - Launched QEMU **TCG** in this sandbox with separate overlay
   `tiny11-sandbox-session.qcow2` and copy of UEFI VARS. First serial
-  and VGA frames show QEMU UEFI starting the installed Windows Boot Manager;
-  later VGA showed `Getting devices ready`. At the time of this report,
-  this **does not yet prove a fully loaded Windows desktop in ChatGPT TCG**.
+  and VGA frames showed UEFI Windows Boot Manager and `Getting devices ready`.
+  **Confirmed real Windows 11 desktop and taskbar** in this chat via QEMU
+  HMP `screendump`, after the `Sandbox VM / Welcome` screen. A second
+  screenshot after sending `sendkey shift` woke the sleeping display and
+  showed active Start/Search/taskbar and evaluation watermark.
+  This is a successful installed-Windows GUI boot in ChatGPT without KVM.
+  The GUI remains slow under TCG and the Windows Enterprise Evaluation
+  screen shows `Windows License is expired`; a properly licensed build is
+  required for sustained production use.
 
 **Bug fixed**: earlier KVM shard-transfer run 40922779780 failed solely because
 it verified restored stage against `STAGE-SHA256SUMS`, which the
@@ -66,10 +76,9 @@ establish validity of ready run 40928819947.
 `debian13-chatgpt-vm` root of the archived QEMU runtime and autoextract
 `/mnt/data/tiny11-qemu-runtime-linux-amd64.tar.gz` when available.
 
-**NEXT**: capture a guest desktop or boot marker from the ChatGPT TCG run,
-then integrate the already verified ready kit into VM-Fabric lifecycle and
-persist its 20 shards somewhere longer-lived than ephemeral Actions artifacts.
-Do not claim TCG GUI desktop boot until verified. This project's public Temp
+**NEXT**: integrate the verified ready kit into VM-Fabric lifecycle and persist
+its 20 shards somewhere longer-lived than ephemeral Actions artifacts.
+GUI desktop boot in ChatGPT TCG is now visually verified. This project's public Temp
 artifacts were explicitly approved by the user for temporary development.
 
 ---
