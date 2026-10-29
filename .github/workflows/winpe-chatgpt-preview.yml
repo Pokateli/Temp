@@ -1,0 +1,108 @@
+name: Bring official Windows PE to ChatGPT sandbox (encrypted)
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths: ['.github/workflows/winpe-chatgpt-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  winpe-preview:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and SHA256 verify official Windows 11 Enterprise Evaluation ISO
+        shell: pwsh
+        timeout-minutes: 16
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          $root=Join-Path $env:RUNNER_TEMP 'winpe-preview'
+          New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $iso=Join-Path $root 'official-win11.iso'
+          $url='https://go.microsoft.com/fwlink/?LinkId=2382600&clcid=0x409&country=us&culture=en-us'
+          & curl.exe --fail --location --retry 2 --max-time 900 --progress-bar --output $iso $url
+          if($LASTEXITCODE -ne 0){throw 'Official Windows ISO download failed'}
+          $hash=(Get-FileHash $iso -Algorithm SHA256).Hash
+          if($hash -ne 'BC3F24086EBADC94489066B5AD78089E2CF5C3491E90E790BB81A2B199C10E38'){throw "Unexpected Windows ISO SHA256: $hash"}
+          Write-Host "Verified Microsoft ISO SHA256 $hash"
+      - name: Build standalone GPT EFI Windows PE boot disk with official boot.wim
+        shell: pwsh
+        timeout-minutes: 9
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'winpe-preview'
+          $iso=Join-Path $root 'official-win11.iso'
+          $vhdx=Join-Path $root 'windows-pe-uefi.vhdx'
+          $diskpart=Join-Path $root 'make.dps'
+          Mount-DiskImage -ImagePath $iso -ErrorAction Stop|Out-Null
+          $letter=Get-DiskImage -ImagePath $iso|Get-Volume|Where-Object DriveLetter|Select-Object -First 1 -ExpandProperty DriveLetter
+          if(-not $letter){throw "Mounted ISO drive letter missing"}
+          $src="$($letter):\"
+          $wim=Join-Path $src 'sources\boot.wim'
+          if(-not(Test-Path $wim)){throw 'Official ISO boot.wim missing'}
+          Write-Host "Official Windows PE WIM bytes=$((Get-Item $wim).Length)"
+          if(Test-Path 'S:\'){throw 'Windows runner S drive letter occupied'}
+          @(
+            ('CREATE VDISK FILE="{0}" MAXIMUM=4096 TYPE=EXPANDABLE' -f $vhdx),
+            ('SELECT VDISK FILE="{0}"' -f $vhdx),
+            'ATTACH VDISK',
+            'CONVERT GPT',
+            'CREATE PARTITION EFI SIZE=3700',
+            'FORMAT FS=FAT32 QUICK LABEL=WINPE',
+            'ASSIGN LETTER=S',
+            'EXIT'
+          )|Set-Content -LiteralPath $diskpart -Encoding ASCII
+          & diskpart.exe /s $diskpart | Out-Host
+          if(-not(Test-Path 'S:\')){throw 'EFI test disk not ready'}
+          foreach($dir in @('boot','efi')){
+            Copy-Item -LiteralPath (Join-Path $src $dir) -Destination ("S:\"+$dir) -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force 'S:\sources'|Out-Null
+          Copy-Item -LiteralPath $wim -Destination 'S:\sources\boot.wim' -Force
+          foreach($f in @('bootmgr','bootmgr.efi','setup.exe')){
+            if(Test-Path (Join-Path $src $f)){Copy-Item -LiteralPath (Join-Path $src $f) -Destination ("S:\"+$f) -Force}
+          }
+          if(-not(Test-Path 'S:\EFI\Boot\bootx64.efi')){throw 'UEFI bootx64.efi missing'}
+          if(-not(Test-Path 'S:\sources\boot.wim')){throw 'Windows PE WIM copy failed'}
+          $script=Join-Path $root 'detach.dps'
+          @( ('SELECT VDISK FILE="{0}"' -f $vhdx), 'DETACH VDISK', 'EXIT')|Set-Content -LiteralPath $script -Encoding ASCII
+          $detach=(& diskpart.exe /s $script|Out-String)
+          Write-Host $detach
+          if($detach -notmatch '(?i)successfully detached'){throw 'EFI VHDX did not detach safely'}
+          Dismount-DiskImage -ImagePath $iso -ErrorAction SilentlyContinue|Out-Null
+      - name: Convert bootable WinPE into ZSTD QCOW2 and verify bytes
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          & choco install qemu --version=2026.8.11 --yes --no-progress --limit-output
+          if($LASTEXITCODE -ne 0){throw 'QEMU missing'}
+          $root=Join-Path $env:RUNNER_TEMP 'winpe-preview'
+          $img='C:\Program Files\qemu\qemu-img.exe'
+          $vhdx=Join-Path $root 'windows-pe-uefi.vhdx'
+          $qcow=Join-Path $root 'windows-pe-uefi-zstd.qcow2'
+          & $img convert -p -c -f vhdx -O qcow2 -o 'compat=1.1,compression_type=zstd' $vhdx $qcow
+          if($LASTEXITCODE -ne 0){throw 'QCOW2 ZSTD compression failed'}
+          & $img compare -f vhdx -F qcow2 $vhdx $qcow
+          if($LASTEXITCODE -ne 0){throw 'Boot disk and compressed copy differ'}
+          Write-Host "PASS Windows PE boot disk ZSTD size $((Get-Item $qcow).Length)"
+      - name: RSA-OAEP/AES-GCM encrypt WinPE image for isolated ChatGPT sandbox
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --quiet 'cryptography>=44,<48'
+          if($LASTEXITCODE -ne 0){throw 'Encryption dependency missing'}
+          $root=Join-Path $env:RUNNER_TEMP 'winpe-preview'
+          python windows-vm-runtime/rsa-transfer.py encrypt "$root/windows-pe-uefi-zstd.qcow2" "$env:GITHUB_WORKSPACE/winpe-encrypted" --key windows-vm-runtime/transit-public.pem
+          if($LASTEXITCODE -ne 0){throw 'Encrypted transfer failed'}
+      - name: Upload encrypted WinPE boot disk only (no unencrypted Microsoft OS bytes)
+        uses: actions/upload-artifact@v4
+        with:
+          name: winpe-chatgpt-rsa-encrypted
+          path: winpe-encrypted/
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
