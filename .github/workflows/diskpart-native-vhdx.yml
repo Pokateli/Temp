@@ -1,0 +1,60 @@
+name: Diagnose native Windows DiskPart expandable VHDX
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths: ['.github/workflows/diskpart-native-vhdx.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Probe exact DiskPart CREATE VDISK syntax and mounted GPT disk
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'native-vhdx-probe'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $vhdx=Join-Path $root 'native.vhdx'
+          $scenarios=@(
+            ('CREATE VDISK FILE="{0}" MAXIMUM=1024 TYPE=EXPANDABLE' -f $vhdx),
+            ('CREATE VDISK FILE="{0}" MAXIMUM=1024' -f $vhdx),
+            ('CREATE VDISK FILE={0} MAXIMUM=1024 TYPE=EXPANDABLE' -f $vhdx)
+          )
+          $created=$false
+          for($i=0;$i -lt $scenarios.Count;$i++){
+            $script=Join-Path $root ("probe-$i.txt")
+            $scenarios[$i] | Set-Content -Path $script -Encoding ASCII
+            Write-Host "DiskPart input $i: $(Get-Content $script -Raw)"
+            & diskpart.exe /s $script | Out-Host
+            if(Test-Path $vhdx){
+              Write-Host "Created VHDX with scenario $i"
+              $created=$true
+              break
+            }
+          }
+          if(-not $created){throw "All DiskPart CREATE VDISK syntax variants failed"}
+          $script=Join-Path $root 'attach.dps'
+          @(
+            ('SELECT VDISK FILE="{0}"' -f $vhdx),
+            'ATTACH VDISK',
+            'CONVERT GPT',
+            'CREATE PARTITION PRIMARY',
+            'FORMAT FS=NTFS QUICK LABEL=PROBE',
+            'ASSIGN LETTER=R',
+            'EXIT'
+          ) | Set-Content -Path $script -Encoding ASCII
+          Write-Host "DiskPart attach script:"; Get-Content $script | Out-Host
+          & diskpart.exe /s $script | Out-Host
+          if(-not(Test-Path 'R:\')) {throw 'Native VHDX did not mount as R:'}
+          Set-Content R:\TEST.TXT -Value NATIVE_VHDX_OK -Encoding ASCII
+          $det=Join-Path $root 'detach.dps'
+          @(
+            ('SELECT VDISK FILE="{0}"' -f $vhdx),
+            'DETACH VDISK',
+            'EXIT'
+          ) | Set-Content $det -Encoding ASCII
+          & diskpart.exe /s $det | Out-Host
+          Write-Host "PASS: Native VHDX created, GPT/NTFS formatted, written, detached."
