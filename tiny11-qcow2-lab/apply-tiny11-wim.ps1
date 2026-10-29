@@ -79,6 +79,22 @@ for /L %%N in (1,1,8) do (
 echo PROBE_FAT_DEVICE_NOT_FOUND>>"%SystemRoot%\Temp\Tiny11Specialize.log"
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $scriptDir 'Tiny11Probe.cmd') -Encoding ASCII
+  @'
+@echo off
+setlocal EnableExtensions
+if not exist "%SystemRoot%\Temp" mkdir "%SystemRoot%\Temp"
+echo TINY11_AUDIT_STARTED>"%SystemRoot%\Temp\Tiny11Audit.log"
+for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
+ if exist %%D:\TINY11_PROBE.TXT (
+   echo TINY11_AUDIT_READY>%%D:\TINY11_AUDIT_READY.TXT
+   ver >>%%D:\TINY11_AUDIT_READY.TXT
+   echo STAGE=AUDIT_USER>>%%D:\TINY11_AUDIT_READY.TXT
+   exit /b 0
+ )
+)
+echo PROBE_FAT_NOT_FOUND>>"%SystemRoot%\Temp\Tiny11Audit.log"
+exit /b 0
+'@ | Set-Content -LiteralPath (Join-Path $scriptDir 'Tiny11Audit.cmd') -Encoding ASCII
   Write-Host 'Installed Windows Audit answer file and specialize guest marker command'
   # SetupComplete is expected to run as SYSTEM when initial Windows setup finalizes.
   # QEMU host provides TINY11_PROBE.TXT on its FAT virtual exchange disk.
