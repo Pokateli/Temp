@@ -1,4 +1,4 @@
-name: Tiny11 staged build + ZSTD QCOW2 + real Windows TCG boot
+name: Tiny11 staged build + ZSTD QCOW2 + real Windows TCG boot (retry 2)
 on:
   push:
     branches: [windows-tiny11-zstd-debug-20261029]
