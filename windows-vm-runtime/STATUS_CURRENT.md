@@ -1,3 +1,52 @@
+# Update — accelerated public Tiny11 development pipeline (2026-10-29)
+
+The user explicitly authorized **unencrypted Windows development disk artifacts**
+in the public Temp repository, pending a future move to a private repository.
+This authorization supersedes the earlier engineering choice that *all* artifacts
+must be encrypted. The old encrypted workflows remain available as alternatives.
+Microsoft evaluation licensing/redistribution terms remain separate.
+
+## Current confirmed facts
+- GitHub Ubuntu KVM works under sudo after /dev/kvm owner/permissions restrictions:
+  [KVM run 40905059946](https://github.com/Pokateli/Temp/actions/runs/40905059946).
+  Windows-runner WHPX failed with nested virtualization error 80370302.
+- Previously produced installed (pre-OOBE) Windows QCOW2 was **7,905,869,824 bytes**,
+  with ZSTD compressed extents and byte-identical VHDX comparison. First boot
+  stalled at Getting ready and failed the 40 minute TCG gate:
+  [failure run 40885221311](https://github.com/Pokateli/Temp/actions/runs/40885221311).
+- Public unencrypted KVM firstboot pipeline:
+  [run 40906341119](https://github.com/Pokateli/Temp/actions/runs/40906341119).
+  **Its successful completion was not yet confirmed at this update.**
+- Streamed 384-MiB shard roundtrip and cross-boundary test passed:
+  [run 40906485624](https://github.com/Pokateli/Temp/actions/runs/40906485624).
+
+## Workflow map
+- `.github/workflows/tiny11-ready-kvm-public.yml`: **Windows WIM/DISM to a
+  first-login stage QCOW2**, temporary plain development artifact with
+  SHA256, transfer to Linux KVM, first OOBE and guest clean poweroff,
+  ready ZSTD standalone QCOW2, second boot proof under KVM.
+  After success, creates `tiny11-ready-public-index` and numbered
+  `tiny11-ready-public-shard-000` onward (384 MiB each).
+- `.github/workflows/tiny11-ready-public-run.yml`: reassemble output of an
+  earlier successful build run from public shards on Linux KVM and prove
+  a new installed Windows boot without reinstalling.
+- `windows-vm-runtime/ready-parts.py`: streamed tar serialization,
+  SHA256-checked 384 MiB unencrypted chunks and verified restoration.
+- `windows-vm-runtime/finalize-ready-kvm.py`: Windows first OOBE in KVM, COM1/FAT
+  ready proof and clean shutdown, flattened standalone ZSTD QCOW2 manifest.
+- `windows-vm-runtime/bootstrap-chatgpt.sh`: accepts public ready shards
+  from `PUBLIC_PARTS_DIR` (default `/mnt/data/tiny11-ready-public-parts`),
+  or the old AES-GCM bundle. QEMU remains TCG in ChatGPT unless KVM available.
+  Compact QEMU_HOME may point to `/mnt/data/tiny11-qemu-runtime-linux-amd64`.
+
+The temporary public stage artifact retains Windows account credentials,
+so **do not treat it as secret**. Guest VM network is disabled by launch scripts.
+Converting a repo to private does not guarantee revocation of previously
+downloaded public artifacts. The final ready disk/desktop is NOT confirmed
+until a successful `probe-result.json` with `boot_confirmed: true` is obtained.
+
+---
+
 # Tiny11 dual-run project — verified handoff state
 
 Project repo: `Pokateli/Temp`, feature branch `windows-tiny11-dual-ready-20261029`. Do not merge to `main` until tested.
