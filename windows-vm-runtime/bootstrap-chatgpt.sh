@@ -5,9 +5,12 @@ set -Eeuo pipefail
 RUNTIME="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 READY_DIR="${READY_DIR:-/mnt/data/tiny11-ready}"
 ENCRYPTED_DIR="${ENCRYPTED_DIR:-/mnt/data/tiny11-ready-encrypted}"
+PUBLIC_PARTS_DIR="${PUBLIC_PARTS_DIR:-/mnt/data/tiny11-ready-public-parts}"
 ACTION="${1:-verify}"
 if [ -z "${QEMU_HOME:-}" ]; then
   for candidate in \
+    /mnt/data/tiny11-qemu-runtime-linux-amd64 \
+    /mnt/data/tiny11-portable-qemu/tiny11-qemu-runtime-linux-amd64 \
     /mnt/data/debian13-chatgpt-vm \
     /mnt/data/debian13-qemu-bundle \
     /mnt/data/tiny11-local-sandbox/debian13-qemu-bundle \
@@ -31,13 +34,18 @@ if [ -z "${QEMU_HOME:-}" ]; then
 fi
 export QEMU_HOME
 if [ ! -f "$READY_DIR/tiny11-ready-manifest.json" ]; then
-  if [ ! -f "$ENCRYPTED_DIR/envelope.json" ]; then
-    echo "No ready disk found. Supply encrypted GitHub artifact parts into $ENCRYPTED_DIR" >&2
-    echo "Expected source: Temp Actions artifact tiny11-ready-encrypted-v1 (requires repo passphrase secret)" >&2
+  if [ -f "$PUBLIC_PARTS_DIR/ready-parts.json" ]; then
+    echo "Restoring SHA256-verified public Temp development Tiny11 shards into $READY_DIR"
+    echo "NOTE: these approved development artifacts are not encrypted."
+    python3 "$RUNTIME/ready-parts.py" unpack "$PUBLIC_PARTS_DIR" "$READY_DIR"
+  elif [ -f "$ENCRYPTED_DIR/envelope.json" ]; then
+    echo "Decrypting AES-256-GCM authenticated ready disk into $READY_DIR"
+    python3 "$RUNTIME/secure-bundle.py" decrypt "$ENCRYPTED_DIR" "$READY_DIR"
+  else
+    echo "No ready disk. Put ready-parts.json and part-*.bin in $PUBLIC_PARTS_DIR" >&2
+    echo "Or put envelope.json and encrypted parts in $ENCRYPTED_DIR." >&2
     exit 2
   fi
-  echo "Decrypting AES-256-GCM authenticated ready disk into $READY_DIR"
-  python3 "$RUNTIME/secure-bundle.py" decrypt "$ENCRYPTED_DIR" "$READY_DIR"
 fi
 echo "Checking the installed-Windows QCOW2, UEFI, and SHA-256 manifest..."
 python3 "$RUNTIME/dual-run.py" verify --vm-dir "$READY_DIR" --qemu-home "$QEMU_HOME"
