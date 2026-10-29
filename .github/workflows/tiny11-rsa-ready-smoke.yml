@@ -1,0 +1,39 @@
+name: Tiny11 ready RSA encrypted artifact transfer preflight
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths: ['.github/workflows/tiny11-rsa-ready-smoke.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rsa-ready-synthetic:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create synthetic preinstalled-disk bundle and exercise native Windows TAR + RSA encryption
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --disable-pip-version-check 'cryptography>=44,<48' --quiet
+          if($LASTEXITCODE -ne 0){throw 'cryptography missing'}
+          $root=Join-Path $env:RUNNER_TEMP 'tiny11-rsa-synthetic'
+          New-Item -ItemType Directory -Force $root | Out-Null
+          $files=@('tiny11-ready-zstd.qcow2','tiny11-ready-manifest.json','OVMF_CODE.fd','OVMF_VARS.fd','ready-credentials.txt','SHA256SUMS')
+          [IO.File]::WriteAllBytes((Join-Path $root 'tiny11-ready-zstd.qcow2'),[byte[]]::new(3MB))
+          for($i=1;$i -lt $files.Count;$i++){Set-Content -LiteralPath (Join-Path $root $files[$i]) -Value "SYNTHETIC-$i" -Encoding ASCII}
+          $tar=Join-Path $root 'tiny11-ready-private.tar'
+          & tar.exe -cf $tar -C $root @files
+          if($LASTEXITCODE -ne 0){throw 'Native Windows tar -cf source failed'}
+          python windows-vm-runtime/rsa-transfer.py encrypt $tar "$env:GITHUB_WORKSPACE/rsa-smoke" --key windows-vm-runtime/transit-public.pem
+          if($LASTEXITCODE -ne 0){throw 'RSA-AES-GCM encrypt failed'}
+          if(-not(Test-Path "$env:GITHUB_WORKSPACE/rsa-smoke/manifest.json")){throw 'Encrypted manifest not created'}
+          Write-Host 'PASS native TAR + RSA-OAEP/AES-GCM file encryption of synthetic ready-disk package'
+      - name: Upload encrypted synthetic ready disk sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-rsa-ready-synthetic
+          path: rsa-smoke/
+          compression-level: 0
+          retention-days: 4
