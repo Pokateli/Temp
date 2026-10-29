@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
-      - name: Build VHDX, format, write test contents, and convert with ZSTD
+      - name: Create GPT VHDX using Windows Storage cmdlets and verify ZSTD QCOW2
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -22,37 +22,35 @@ jobs:
           New-Item -ItemType Directory -Force -Path $root | Out-Null
           $vhdx=Join-Path $root 'probe.vhdx'
           $qcow=Join-Path $root 'probe.qcow2'
-          if(Get-Volume -DriveLetter R -ErrorAction SilentlyContinue){throw "R drive occupied"}
-          $dps=Join-Path $root 'create.dps'
-          @(
-            'create vdisk file="'+$vhdx+'" maximum=1024 type=expandable',
-            'select vdisk file="'+$vhdx+'"',
-            'attach vdisk',
-            'convert gpt',
-            'create partition primary',
-            'format quick fs=ntfs label="VHDXTEST"',
-            'assign letter=R',
-            'exit'
-          )|Set-Content $dps -Encoding ASCII
-          & diskpart.exe /s $dps | Out-Host
-          if($LASTEXITCODE -ne 0 -or -not(Test-Path 'R:\')){throw "DiskPart did not attach usable VHDX"}
+          & $img create -f vhdx -o subformat=dynamic $vhdx 1024M
+          if($LASTEXITCODE -ne 0){throw 'VHDX creation failed'}
+          $mounted=$false
           try {
-            [System.IO.File]::WriteAllBytes('R:\PAYLOAD.BIN', (New-Object byte[] (32MB)))
-            Set-Content 'R:\READY.TXT' -Value 'DISKPART_OK' -Encoding ASCII
-            if(-not(Test-Path 'R:\PAYLOAD.BIN')){throw "Payload not written"}
+            $mountedObj=Mount-DiskImage -ImagePath $vhdx -StorageType VHD -PassThru -ErrorAction Stop
+            $mounted=$true
+            $disk=($mountedObj|Get-Disk)
+            if($disk.IsOffline){Set-Disk -Number $disk.Number -IsOffline $false}
+            if($disk.IsReadOnly){Set-Disk -Number $disk.Number -IsReadOnly $false}
+            Initialize-Disk -Number $disk.Number -PartitionStyle GPT -ErrorAction Stop
+            $part=New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
+            $vol=Format-Volume -Partition $part -FileSystem NTFS -NewFileSystemLabel VHDXTEST -Confirm:$false
+            $letter=$part.DriveLetter
+            if(-not $letter){throw "No drive letter for VHDX partition"}
+            Write-Host "Virtual test disk assigned $letter"
+            $file="$($letter):\PAYLOAD.BIN"
+            [System.IO.File]::WriteAllBytes($file, (New-Object byte[] (32MB)))
+            Set-Content "$($letter):\READY.TXT" -Value DISKPART_OK -Encoding ASCII
+            if(-not(Test-Path $file)){throw 'Test payload not written'}
           } finally {
-            $detach=Join-Path $root 'detach.dps'
-            @('select vdisk file="'+$vhdx+'"','detach vdisk','exit')|Set-Content $detach -Encoding ASCII
-            & diskpart.exe /s $detach | Out-Host
+            if($mounted){Dismount-DiskImage -ImagePath $vhdx -ErrorAction Stop | Out-Null}
           }
-          if(-not(Test-Path $vhdx)){throw "VHDX missing"}
           & $img convert -c -f vhdx -O qcow2 -o 'compat=1.1,compression_type=zstd' $vhdx $qcow
-          if($LASTEXITCODE -ne 0){throw "Conversion failed"}
+          if($LASTEXITCODE -ne 0){throw 'Conversion failed'}
           $info=(& $img info --output=json $qcow | Out-String)|ConvertFrom-Json
           $maps=(& $img map --output=json $qcow | Out-String)|ConvertFrom-Json
           & $img compare -f vhdx -F qcow2 $vhdx $qcow
-          if($LASTEXITCODE -ne 0){throw "VHDX-QCOW2 compare failed"}
+          if($LASTEXITCODE -ne 0){throw 'VHDX-QCOW2 compare failed'}
           $compressed=@($maps|Where-Object {$_.compressed -eq $true}).Count
-          if($compressed -eq 0){throw "No compressed clusters"}
-          if(($info|ConvertTo-Json -Depth 10) -notmatch 'zstd'){throw "No zstd metadata"}
-          Write-Host "PASS: VHDX to ZSTD-QCOW2 compressed extents=$compressed, source $((Get-Item $vhdx).Length) bytes, result $((Get-Item $qcow).Length) bytes"
+          if($compressed -eq 0){throw 'No compressed clusters'}
+          if(($info|ConvertTo-Json -Depth 10) -notmatch 'zstd'){throw 'No zstd metadata'}
+          Write-Host "PASS: VHDX to ZSTD-QCOW2 compressed extents=$compressed; source=$((Get-Item $vhdx).Length) bytes, qcow=$((Get-Item $qcow).Length) bytes"
