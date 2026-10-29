@@ -1,0 +1,48 @@
+name: Tiny11 Linux KVM hardware smoke without Windows
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - 'windows-vm-runtime/kvm-preflight.py'
+      - '.github/workflows/tiny11-kvm-hardware-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  kvm-guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU with ZSTD and OVMF
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ovmf
+          test -c /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          python3 -m py_compile windows-vm-runtime/kvm-preflight.py
+      - name: Create synthetic ZSTD QCOW2 and launch OVMF under non-root KVM
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          dir="$RUNNER_TEMP/kvm-guest-probe"
+          mkdir -p "$dir"
+          truncate -s 128M "$dir/synthetic.raw"
+          qemu-img convert -c -f raw -O qcow2 -o compat=1.1,compression_type=zstd "$dir/synthetic.raw" "$dir/synthetic-zstd.qcow2"
+          cp /usr/share/OVMF/OVMF_CODE_4M.fd "$dir/OVMF_CODE.fd"
+          cp /usr/share/OVMF/OVMF_VARS_4M.fd "$dir/OVMF_VARS.fd"
+          qemu-img info "$dir/synthetic-zstd.qcow2" | grep -i zstd
+          python3 windows-vm-runtime/kvm-preflight.py --dir "$dir" --seconds 15
+      - name: Publish only synthetic QEMU log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-kvm-synthetic-firstboot-probe
+          path: |
+            ${{ runner.temp }}/kvm-guest-probe/qemu.log
+            ${{ runner.temp }}/kvm-guest-probe/boot-serial.log
+          retention-days: 3
+          if-no-files-found: warn
