@@ -97,8 +97,17 @@ def main():
         subprocess.run(qimg+["create","-f","qcow2","-F","qcow2","-b",str(disk),str(overlay)],check=True)
     if not session_vars.is_file():shutil.copyfile(vars_base,session_vars)
     share=root/"sharefiles";share.mkdir(exist_ok=True)
-    (share/"TINY11_PROBE.TXT").write_text("DUAL_RUNTIME_READY_PROBE\n",encoding="ascii")
     (share/"TINY11_INSTALLED_READY.TXT").unlink(missing_ok=True)
+    # Only the automated probe requests a Windows-initiated clean shutdown.
+    # Interactive 'start' never issues an automated shutdown request.
+    probe_request=share/"TINY11_PROBE.TXT"
+    shutdown_request=share/"TINY11_AUTOTEST_SHUTDOWN.TXT"
+    if opt.action=="probe":
+        probe_request.write_text("DUAL_RUNTIME_READY_PROBE\n",encoding="ascii")
+        shutdown_request.write_text("AUTOTEST_SHUTDOWN_V1\n",encoding="ascii")
+    else:
+        probe_request.unlink(missing_ok=True)
+        shutdown_request.unlink(missing_ok=True)
     monitor=root/"qemu-monitor.sock"
     if monitor.exists():monitor.unlink()
     cmd=qemu_command("qemu-system-x86_64",opt.qemu_home)
@@ -127,19 +136,29 @@ def main():
     with log.open("w",encoding="utf8") as out:
         proc=subprocess.Popen(cmd,stdout=out,stderr=subprocess.STDOUT)
         deadline=time.monotonic()+opt.seconds
-        success=False
+        timed_out=False
         try:
-            while time.monotonic()<deadline:
-                if ready.exists() and "TINY11_INSTALLED_READY" in ready.read_text(errors="replace"):
-                    success=True;print("PASS: Windows STARTUP marker from already-installed OS",flush=True);break
-                if proc.poll() is not None:break
+            while proc.poll() is None:
+                if time.monotonic()>=deadline:
+                    timed_out=True
+                    break
                 time.sleep(5)
         finally:
             if proc.poll() is None:
                 proc.terminate()
                 try:proc.wait(timeout=8)
                 except subprocess.TimeoutExpired:proc.kill();proc.wait()
+        # QEMU's vvfat backend can delay making Windows guest writes visible to
+        # the host until QEMU exits. Do NOT decide success before final flush.
+        proof=ready.read_text(errors="replace") if ready.is_file() else ""
+        success=(not timed_out and proc.returncode==0 and
+                 "TINY11_INSTALLED_READY" in proof and
+                 "COMPUTER=" in proof)
+        if success:
+            print("PASS: already-installed Windows wrote startup proof and powered off cleanly",flush=True)
         result={"boot_confirmed":success,"runtime":"qemu-tcg","probe_seconds":opt.seconds,
+                "guest_shutdown_clean":proc.returncode==0 and not timed_out,
+                "qemu_exit_code":proc.returncode,"probe_timed_out":timed_out,
                 "guest_ready_file":str(ready),"log":str(log),"image_sha256":meta["disk_sha256"]}
         (root/"probe-result.json").write_text(json.dumps(result,indent=2)+"\n")
         print(json.dumps(result,indent=2))
