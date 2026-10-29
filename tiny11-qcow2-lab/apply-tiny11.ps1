@@ -77,7 +77,17 @@ exit /b 0
     $detach=Join-Path $root 'detach-vhdx.dps'
     @( ('SELECT VDISK FILE="{0}"' -f $vhdx), 'DETACH VDISK', 'EXIT' ) |
       Set-Content $detach -Encoding ASCII
-    & diskpart.exe /s $detach | Out-Host
+    Write-Host 'Detaching Windows VHDX, flushing NTFS and VHDX journal'
+    $detOut=(& diskpart.exe /s $detach | Out-String)
+    $detOut | Write-Host
+    $detOut | Set-Content (Join-Path $report 'diskpart-detach.txt')
+    if($detOut -notmatch '(?i)successfully detached'){
+      throw 'Native VHDX did not detach cleanly; stopping before qemu-img conversion'
+    }
+    $stillMounted=Get-DiskImage -ImagePath $vhdx -ErrorAction SilentlyContinue
+    if($stillMounted -and $stillMounted.Attached){
+      throw 'VHDX is still mounted after DiskPart detachment; refusing unsafe conversion'
+    }
   }
   Dismount-DiskImage -ImagePath $iso -ErrorAction SilentlyContinue | Out-Null
 }
