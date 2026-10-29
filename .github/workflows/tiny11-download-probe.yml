@@ -1,0 +1,30 @@
+name: Probe official Windows ISO download headers
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths: ['.github/workflows/tiny11-download-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - name: HEAD URL, response and content size; no ISO downloaded
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://go.microsoft.com/fwlink/?LinkId=2382600&clcid=0x409&country=us&culture=en-us'
+          & curl.exe --silent --show-error --head --location --max-time 55 --connect-timeout 15 --dump-header "$env:RUNNER_TEMP\headers.txt" --output NUL --write-out 'HEAD code=%{http_code} bytes=%{size_download} resolved=%{url_effective}\n' $url
+          $c=$LASTEXITCODE
+          Write-Host "curl exit status: $c"
+          if(Test-Path "$env:RUNNER_TEMP\headers.txt"){
+            Get-Content "$env:RUNNER_TEMP\headers.txt" |
+              Where-Object {$_ -match '^(HTTP/|[Cc]ontent-[Ll]ength:|[Cc]ontent-[Tt]ype:|[Ll]ocation:|[Aa]ccept-[Rr]anges:)'} |
+              ForEach-Object {
+                if($_ -match '^(Location|location):'){Write-Host 'Location: [redirect omitted]'}
+                else{Write-Host $_}
+              }
+          }
+          if($c -ne 0){throw 'Official Microsoft ISO HEAD request not successful'}
