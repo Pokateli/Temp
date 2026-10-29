@@ -95,7 +95,18 @@ if((-not $seenReady) -and (Test-Path $marker)){
   Write-Host 'Windows first login marker detected after clean QEMU shutdown'
  }
 }
-if(-not $seenReady){throw "Windows first login marker missing; QEMU exit=$codeExit"}
+# Independent QEMU COM1 proof helps when vvfat's guest file is published late
+# or not at all. A serial marker is accepted only after the guest shutdown.
+if((-not $seenReady) -and (Test-Path $serial)){
+ $serialProof=Get-Content -LiteralPath $serial -Raw -ErrorAction SilentlyContinue
+ if($serialProof -and $serialProof.Contains('TINY11_FIRST_LOGON_READY INSTALLED_AND_OOBE_FINISHED')){
+  $seenReady=$true
+  'TINY11_FIRST_LOGON_READY INSTALLED_AND_OOBE_FINISHED (COM1)' |
+   Set-Content (Join-Path $logs 'windows-first-logon-proof.txt')
+  Write-Host 'Windows first login confirmed via QEMU COM1 after guest shutdown'
+ }
+}
+if(-not $seenReady){throw "Windows first login marker missing on FAT and COM1; QEMU exit=$codeExit"}
 if($codeExit -ne 0){throw "QEMU exit not clean: $codeExit"}
 Write-Host 'PASS Windows OOBE finished, local vmuser logged in, Windows powered off cleanly'
 & $img convert -p -c -f qcow2 -O qcow2 -o 'compat=1.1,compression_type=zstd' $overlay $ready
