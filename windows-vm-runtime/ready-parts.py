@@ -13,8 +13,14 @@ import tarfile
 import sys
 
 CHUNK=384*1024*1024
-FILES=("tiny11-ready-zstd.qcow2","OVMF_CODE.fd","OVMF_VARS.fd",
-       "tiny11-ready-manifest.json","ready-credentials.txt","SHA256SUMS")
+FILESETS={
+    "ready":("tiny11-ready-zstd.qcow2","OVMF_CODE.fd","OVMF_VARS.fd",
+             "tiny11-ready-manifest.json","ready-credentials.txt","SHA256SUMS"),
+    "stage":("tiny11-zstd.qcow2","ready-credentials.txt"),
+}
+INDEX={"ready":"ready-parts.json","stage":"stage-parts.json"}
+FORMATS={"ready":"tiny11-ready-public-parts-v1",
+         "stage":"tiny11-stage-public-parts-v1"}
 
 def digest(p):
     h=hashlib.sha256()
@@ -74,37 +80,45 @@ class ChunkReader:
             self.input.close();self.input=None;self.index+=1
         return data
 
-def pack(src,dest):
+def pack(src,dest,kind):
+    files=FILESETS[kind]
     dest.mkdir(parents=True,exist_ok=True)
     if any(dest.iterdir()):raise SystemExit("Refuse non-empty destination")
     manifest={}
-    for name in FILES:
+    for name in files:
         p=src/name
         if not p.is_file():raise SystemExit("Missing ready file: "+name)
         manifest[name]={"size":p.stat().st_size,"sha256":digest(p)}
     writer=ChunkWriter(dest)
     with tarfile.open(fileobj=writer,mode="w|",format=tarfile.PAX_FORMAT) as tar:
-        for name in FILES:
+        for name in files:
             tar.add(src/name,arcname=name,recursive=False)
     writer.finish()
-    index={"format":"tiny11-ready-public-parts-v1","unencrypted":True,
+    index={"format":FORMATS[kind],"unencrypted":True,
            "parts":writer.file_list,"tar_bytes":writer.total,
            "members":manifest}
-    (dest/"ready-parts.json").write_text(json.dumps(index,indent=2)+"\n")
+    (dest/INDEX[kind]).write_text(json.dumps(index,indent=2)+"\n")
     print("Prepared",len(writer.file_list),"public parts totaling",writer.total,"bytes")
     print("Largest size",max((x["size"] for x in writer.file_list),default=0),"bytes")
 
-def unpack(src,dest):
-    idx=json.loads((src/"ready-parts.json").read_text())
-    if idx.get("format")!="tiny11-ready-public-parts-v1":raise SystemExit("Invalid index")
-    if sorted(idx["members"])!=sorted(FILES):raise SystemExit("Unexpected kit member listing")
+def unpack(src,dest,kind):
+    files=FILESETS[kind]
+    idx=json.loads((src/INDEX[kind]).read_text())
+    if idx.get("format")!=FORMATS[kind]:raise SystemExit("Invalid index")
+    if sorted(idx["members"])!=sorted(files):raise SystemExit("Unexpected kit member listing")
+    if not idx.get("unencrypted"):raise SystemExit("Unsupported parts encoding")
+    if not idx.get("parts"):raise SystemExit("Empty shard index")
+    if len(idx["parts"])>96:raise SystemExit("Unexpected excessive shard count")
+    for i,part in enumerate(idx["parts"]):
+        if part.get("name")!=f"part-{i:03d}.bin" or not 0<part.get("size",0)<=CHUNK:
+            raise SystemExit("Invalid chunk name or size")
     dest.mkdir(parents=True,exist_ok=True)
     if any(dest.iterdir()):raise SystemExit("Refuse nonempty destination")
     reader=ChunkReader(src,idx)
     with tarfile.open(fileobj=reader,mode="r|") as tar:
         seen=set()
         for item in tar:
-            if item.name not in FILES or item.name in seen or not item.isfile():
+            if item.name not in files or item.name in seen or not item.isfile():
                 raise ValueError("Unknown, repeated or unsafe tar member")
             seen.add(item.name)
             if item.size!=idx["members"][item.name]["size"]:
@@ -112,8 +126,8 @@ def unpack(src,dest):
             with (dest/item.name).open("wb") as out:
                 f=tar.extractfile(item)
                 for block in iter(lambda:f.read(4*1024*1024),b""):out.write(block)
-    if seen!=set(FILES):raise ValueError("Archive has missing files")
-    for name in FILES:
+    if seen!=set(files):raise ValueError("Archive has missing files")
+    for name in files:
         p=dest/name
         if digest(p)!=idx["members"][name]["sha256"]:
             raise ValueError("Restored member SHA256 mismatch: "+name)
@@ -124,6 +138,7 @@ def main():
     p.add_argument("action",choices=("pack","unpack"))
     p.add_argument("source",type=Path)
     p.add_argument("destination",type=Path)
+    p.add_argument("--kind",choices=tuple(FILESETS),default="ready")
     a=p.parse_args()
-    (pack if a.action=="pack" else unpack)(a.source,a.destination)
+    (pack if a.action=="pack" else unpack)(a.source,a.destination,a.kind)
 if __name__=="__main__":main()
