@@ -26,7 +26,7 @@ $serialLog = Join-Path $logs 'qemu-serial.txt'
 $stdout = Join-Path $logs 'qemu-stdout.txt'
 $stderr = Join-Path $logs 'qemu-stderr.txt'
 $argumentList = @(
-  '-machine','pc,accel=tcg',
+  '-machine','pc,accel=tcg,thread=multi',
   '-cpu','max',
   '-smp','2',
   '-m','3072',
@@ -45,13 +45,32 @@ Write-Host ("args: " + ($argumentList -join ' '))
 $p = Start-Process -FilePath $qemu -ArgumentList $argumentList -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 $ready = $false
 try {
-  $deadline = (Get-Date).AddMinutes(5)
+  $deadline = (Get-Date).AddMinutes(8)
   $start = Get-Date
   $captured = @{}
+  $keysSent = @{}
   while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 5
     $elapsed = ((Get-Date) - $start).TotalSeconds
-    foreach ($seconds in @(45,120,240)) {
+    # Windows PE El Torito boot sector waits at "Press any key to boot from CD/DVD".
+    # QEMU is headless, so inject a key via QEMU human monitor instead of waiting forever.
+    foreach ($seconds in @(5,10,15,20,25,30,35)) {
+      if ($elapsed -ge $seconds -and -not $keysSent.ContainsKey($seconds)) {
+        $keysSent[$seconds] = $true
+        try {
+          $keySocket = [System.Net.Sockets.TcpClient]::new('127.0.0.1',4444)
+          $keyStream = $keySocket.GetStream()
+          $keyWriter = [System.IO.StreamWriter]::new($keyStream,[System.Text.Encoding]::ASCII)
+          $keyWriter.AutoFlush = $true
+          $keyWriter.WriteLine('sendkey ret')
+          Start-Sleep -Milliseconds 200
+          $keyWriter.Dispose()
+          $keySocket.Dispose()
+          Write-Host "Sent QEMU keyboard Enter at elapsed $seconds seconds"
+        } catch { Write-Warning "QEMU sendkey attempt failed: $_" }
+      }
+    }
+    foreach ($seconds in @(45,120,240,360)) {
       if ($elapsed -ge $seconds -and -not $captured.ContainsKey($seconds)) {
         $captured[$seconds] = $true
         $shot = (Join-Path $logs ("screen-" + $seconds + ".ppm")).Replace('\','/')
