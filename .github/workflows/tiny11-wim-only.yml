@@ -1,0 +1,57 @@
+name: Tiny11 WIM-only to ZSTD QCOW2 and TCG boot
+on:
+  push:
+    branches: [windows-tiny11-zstd-debug-20261029]
+    paths:
+      - '.github/workflows/tiny11-wim-only.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build-tiny11:
+    runs-on: windows-2022
+    timeout-minutes: 145
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check PowerShell syntax for modified WIM pipeline
+        shell: pwsh
+        run: |
+          $files=@(
+            'tiny11-qcow2-lab/prepare-tiny11-wim.ps1',
+            'tiny11-qcow2-lab/apply-tiny11-wim.ps1',
+            'tiny11-qcow2-lab/test-tiny11-boot.ps1'
+          )
+          foreach($f in $files){
+            $tok=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tok,[ref]$errors)|Out-Null
+            if($errors.Count -gt 0){$errors|Out-Host;throw "PS parser failed: $f"}
+            Write-Host "PS parser PASS: $f"
+          }
+      - name: Download SHA-256-verified official Microsoft ISO
+        shell: pwsh
+        timeout-minutes: 20
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Download
+      - name: Create Tiny11 serviced WIM (skip redundant ISO construction)
+        shell: pwsh
+        timeout-minutes: 58
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Build
+      - name: Apply modified WIM directly and compress native VHDX into ZSTD QCOW2
+        shell: pwsh
+        timeout-minutes: 40
+        run: ./tiny11-qcow2-lab/apply-tiny11-wim.ps1
+      - name: Boot actual Tiny11 in QEMU TCG, require in-guest proof
+        shell: pwsh
+        timeout-minutes: 22
+        run: ./tiny11-qcow2-lab/test-tiny11-boot.ps1
+      - name: Upload diagnostics only (never Windows OS image)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tiny11-wim-only-diagnostics
+          path: tiny11-qcow2-logs/
+          retention-days: 14
+          if-no-files-found: warn
