@@ -102,6 +102,28 @@ try {
   [IO.File]::WriteAllText($answer,$xml,[Text.UTF8Encoding]::new($false))
   $scriptDir='W:\Windows\Setup\Scripts'
   New-Item -ItemType Directory -Force -Path $scriptDir | Out-Null
+  # Secondary readiness proof: send bounded marker to QEMU emulated COM1.
+  # The virtual FAT drive can cache writes; serial proof does not depend on its
+  # directory synchronization. Failure of optional COM1 telemetry is nonfatal.
+  @'
+param([ValidateSet("FirstReady","SecondBoot")][string]$Event)
+$ErrorActionPreference="Stop"
+$com=$null
+try {
+  $com=New-Object System.IO.Ports.SerialPort("COM1",115200,"None",8,"One")
+  $com.WriteTimeout=3000
+  $com.Open()
+  if($Event -eq "FirstReady") {
+    $com.WriteLine("TINY11_FIRST_LOGON_READY INSTALLED_AND_OOBE_FINISHED")
+  } else {
+    $com.WriteLine("TINY11_INSTALLED_READY SECOND_BOOT_CONFIRMED")
+  }
+} catch {
+  exit 1
+} finally {
+  if($com -and $com.IsOpen){ $com.Close() }
+}
+'@ | Set-Content -LiteralPath (Join-Path $scriptDir 'Tiny11SerialProof.ps1') -Encoding ASCII
   # A startup marker task proves future boots of the *same already-installed* Windows.
   @'
 @echo off
@@ -114,6 +136,7 @@ for /L %%N in (1,1,40) do (
    echo TINY11_INSTALLED_READY>%%D:\TINY11_INSTALLED_READY.TXT
    ver >>%%D:\TINY11_INSTALLED_READY.TXT
    echo COMPUTER=%COMPUTERNAME%>>%%D:\TINY11_INSTALLED_READY.TXT
+   powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SystemRoot%\Setup\Scripts\Tiny11SerialProof.ps1" -Event SecondBoot >nul 2>&1
    dir %%D:\ >nul 2>&1
    rem Only automated second-boot probes request clean guest shutdown.
    rem Normal interactive Windows boots NEVER create this sentinel.
@@ -137,6 +160,7 @@ echo PREPARING_WINDOWS_READY_DISK>"%SystemRoot%\Temp\Tiny11FirstReady.log"
 schtasks.exe /Create /F /SC ONSTART /RU SYSTEM /TN "Tiny11-Ready-Probe" /TR "C:\Windows\Setup\Scripts\Tiny11BootProbe.cmd" >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
 if errorlevel 1 exit /b 1
 powercfg.exe /h off >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SystemRoot%\Setup\Scripts\Tiny11SerialProof.ps1" -Event FirstReady >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
 for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
  if exist %%D:\TINY11_PROBE.TXT (
    echo TINY11_FIRST_LOGON_READY>%%D:\TINY11_FIRST_LOGON_READY.TXT
