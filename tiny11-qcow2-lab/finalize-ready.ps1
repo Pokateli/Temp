@@ -58,11 +58,11 @@ $seenReady=$false
 $shots=@{}
 $codeExit=$null
 try {
- while(((Get-Date)-$started).TotalSeconds -lt 2400){
+ while(((Get-Date)-$started).TotalSeconds -lt 5100){
   Start-Sleep -Seconds 10
   $p.Refresh()
   $sec=[int]((Get-Date)-$started).TotalSeconds
-  foreach($at in @(90,240,540,900,1500,2100)){
+  foreach($at in @(90,240,540,900,1500,2100,3000,3900,4800)){
    if($sec -ge $at -and -not $shots.ContainsKey($at)){
     $shots[$at]=$true;Screenshot $at
    }
@@ -76,7 +76,7 @@ try {
    }
   }
   if($p.HasExited){$codeExit=$p.ExitCode;break}
-  if($sec % 60 -lt 10){Write-Host "OOBE runtime $($sec)s, ready=$seenReady"}
+  if($sec % 120 -lt 10){Write-Host "OOBE runtime $($sec)s, ready=$seenReady"}
  }
 } finally {
  $p.Refresh()
