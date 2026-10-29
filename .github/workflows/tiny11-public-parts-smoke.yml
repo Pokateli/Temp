@@ -1,0 +1,62 @@
+name: Tiny11 public dev ready-disk streaming shards smoke
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - 'windows-vm-runtime/ready-parts.py'
+      - '.github/workflows/tiny11-public-parts-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  roundtrip:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python streaming archive / SHA256 / restore, no Windows OS bytes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile windows-vm-runtime/ready-parts.py
+          mkdir -p /tmp/tiny11-stream-in /tmp/tiny11-stream-chunks /tmp/tiny11-stream-out
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,os,hashlib
+          root=Path('/tmp/tiny11-stream-in')
+          files=('tiny11-ready-zstd.qcow2','OVMF_CODE.fd','OVMF_VARS.fd','tiny11-ready-manifest.json','ready-credentials.txt','SHA256SUMS')
+          (root/files[0]).write_bytes(os.urandom(12*1024*1024))
+          for name in files[1:]:
+              (root/name).write_bytes((name+' SYNTHETIC ONLY\n').encode())
+          PY
+          python3 windows-vm-runtime/ready-parts.py pack /tmp/tiny11-stream-in /tmp/tiny11-stream-chunks
+          python3 windows-vm-runtime/ready-parts.py unpack /tmp/tiny11-stream-chunks /tmp/tiny11-stream-out
+          for f in /tmp/tiny11-stream-in/*;do cmp "$f" "/tmp/tiny11-stream-out/$(basename "$f")";done
+          echo 'PASS: all six synthetic kit files roundtrip through streaming chunks'
+      - name: Exercise chunk boundary with 385 MiB sparse-pattern synthetic payload
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/tiny11-cross-in /tmp/tiny11-cross-parts /tmp/tiny11-cross-out
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/tiny11-cross-in')
+          with (p/'tiny11-ready-zstd.qcow2').open('wb') as f:
+              f.seek(385*1024*1024-1)
+              f.write(b'Z')
+          for n in ('OVMF_CODE.fd','OVMF_VARS.fd','tiny11-ready-manifest.json','ready-credentials.txt','SHA256SUMS'):
+              (p/n).write_text('SYNTHETIC ONLY '+n)
+          PY
+          python3 windows-vm-runtime/ready-parts.py pack /tmp/tiny11-cross-in /tmp/tiny11-cross-parts
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          root=Path('/tmp/tiny11-cross-parts')
+          idx=json.loads((root/'ready-parts.json').read_text())
+          assert len(idx['parts'])>=2
+          assert all(x['size']<=384*1024*1024 for x in idx['parts'])
+          print('PASS: 384 MiB chunk boundaries and part index',len(idx['parts']))
+          PY
+          python3 windows-vm-runtime/ready-parts.py unpack /tmp/tiny11-cross-parts /tmp/tiny11-cross-out
+          cmp /tmp/tiny11-cross-in/tiny11-ready-zstd.qcow2 /tmp/tiny11-cross-out/tiny11-ready-zstd.qcow2
+          echo 'PASS: restored 385MiB crossing chunk boundary'
