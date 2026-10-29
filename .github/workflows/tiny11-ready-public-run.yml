@@ -1,0 +1,81 @@
+name: Run previously installed public Tiny11 QCOW2 in GitHub KVM (no reinstall)
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths: ['windows-vm-runtime/github-public-run-request.json']
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Successful Tiny11 KVM build run with public ready image shards'
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  run-ready:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Ubuntu KVM without Windows installer or ISO
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ovmf
+          test -c /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          test -w /dev/kvm
+          df -h .
+      - name: Download unencrypted ready Windows shards from selected GitHub run
+        shell: bash
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -Eeuo pipefail
+          id="$SOURCE_RUN_ID"
+          if [ -z "$id" ]; then
+            test -f windows-vm-runtime/github-public-run-request.json
+            id="$(python3 -c 'import json; print(json.load(open("windows-vm-runtime/github-public-run-request.json"))["source_run_id"])')"
+          fi
+          [[ "$id" =~ ^[0-9]{7,20}$ ]] || { echo 'Invalid build run id' >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/tiny11-download" "$RUNNER_TEMP/tiny11-parts"
+          gh run download "$id" --repo "$GH_REPO" --pattern 'tiny11-ready-public-*' --dir "$RUNNER_TEMP/tiny11-download"
+          find "$RUNNER_TEMP/tiny11-download" -type f \( -name 'part-*.bin' -o -name 'ready-parts.json' \) -print0 |
+            while IFS= read -r -d '' file; do
+              mv -n "$file" "$RUNNER_TEMP/tiny11-parts/$(basename "$file")"
+            done
+          test -s "$RUNNER_TEMP/tiny11-parts/ready-parts.json"
+          echo 'Found transfer shards:'
+          find "$RUNNER_TEMP/tiny11-parts" -type f -name 'part-*.bin' | wc -l
+      - name: Restore full ready QCOW2 from SHA256-protected 384MiB parts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 windows-vm-runtime/ready-parts.py unpack "$RUNNER_TEMP/tiny11-parts" "$RUNNER_TEMP/tiny11-ready"
+          rm -rf "$RUNNER_TEMP/tiny11-parts" "$RUNNER_TEMP/tiny11-download"
+          python3 windows-vm-runtime/dual-run.py verify --vm-dir "$RUNNER_TEMP/tiny11-ready"
+          df -h .
+      - name: Boot installed Windows via KVM (no ISO or installation)
+        shell: bash
+        timeout-minutes: 28
+        run: |
+          set -Eeuo pipefail
+          python3 windows-vm-runtime/dual-run.py probe --vm-dir "$RUNNER_TEMP/tiny11-ready" --accelerator kvm --headless --seconds 1300
+          grep -q '"boot_confirmed": true' "$RUNNER_TEMP/tiny11-ready/probe-result.json"
+      - name: Publish startup proof only, not another copy of Windows
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-public-github-boot-proof
+          path: |
+            ${{ runner.temp }}/tiny11-ready/probe-result.json
+            ${{ runner.temp }}/tiny11-ready/qemu-probe.log
+            ${{ runner.temp }}/tiny11-ready/qemu-serial.log
+          retention-days: 7
+          if-no-files-found: warn
