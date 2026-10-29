@@ -101,7 +101,7 @@ try {
 }
 if(Test-Path $stderr){Get-Content $stderr -Tail 50|Out-Host}
 if(-not $confirmed){
-  Write-Host 'No TINY11_AUDIT_READY marker: inspect early specialize proof and VGA screenshots; don't claim Audit desktop ready.'
+  Write-Host "No TINY11_AUDIT_READY marker: inspect early specialize proof and VGA screenshots; Audit desktop not confirmed."
   throw 'Windows guest boot was not verified'
 }
 Write-Host 'PASS: Tiny11 reached Windows AuditUser auto-login under QEMU TCG without KVM'
