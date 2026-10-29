@@ -52,6 +52,18 @@ jobs:
           } finally {
             & subst.exe $drive /d | Out-Null
           }
+          # Parse the embedded guest COM1 proof script with the real Windows
+          # PowerShell parser instead of trusting only the outer script syntax.
+          $serialBegin=$raw.IndexOf('param([ValidateSet("FirstReady","SecondBoot")]')
+          if($serialBegin -lt 0){throw 'Embedded COM1 proof script missing'}
+          $serialEnd=$raw.IndexOf("'@ | Set-Content -LiteralPath (Join-Path "+[char]36+"scriptDir 'Tiny11SerialProof.ps1')",$serialBegin)
+          if($serialEnd -lt 0){throw 'Embedded COM1 script terminator missing'}
+          $serialCode=$raw.Substring($serialBegin,$serialEnd-$serialBegin)
+          $serialTokens=$null;$serialErrors=$null
+          [System.Management.Automation.Language.Parser]::ParseInput($serialCode,[ref]$serialTokens,[ref]$serialErrors)|Out-Null
+          if($serialErrors.Count){$serialErrors|Out-Host;throw 'Guest COM1 proof script syntax is invalid'}
+          if($serialCode -notmatch 'TINY11_INSTALLED_READY SECOND_BOOT_CONFIRMED'){throw 'Second boot serial marker missing'}
+          Write-Host 'PASS: Windows guest COM1 readiness proof PowerShell syntax'
           if($raw -notmatch 'TINY11_FIRST_LOGON_READY'){throw 'Missing first login proof'}
           if($raw -notmatch 'shutdown.exe /s /f /t 5'){throw 'No clean guest shutdown command'}
           Write-Host 'PASS: ready-disk Windows first login and shutdown hook present'
