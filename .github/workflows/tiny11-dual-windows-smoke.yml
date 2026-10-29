@@ -1,0 +1,71 @@
+name: Dual Tiny11 Windows runtime and OOBE answer-file preflight
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths: ['.github/workflows/tiny11-dual-windows-smoke.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell and syntax of automatic OOBE answer file
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($f in @(
+            'tiny11-qcow2-lab/apply-tiny11-ready.ps1',
+            'tiny11-qcow2-lab/finalize-ready.ps1'
+          )){
+            $tokens=$null;$problems=$null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$problems)|Out-Null
+            if($problems.Count){$problems|Out-Host;throw "Invalid PowerShell: $f"}
+            Write-Host "PASS PowerShell syntax: $f"
+          }
+          $raw=Get-Content 'tiny11-qcow2-lab/apply-tiny11-ready.ps1' -Raw
+          $rx="(?s)@'\s*(<\?xml.+?</unattend>)\s*'@"
+          $m=[regex]::Match($raw,$rx)
+          if(-not $m.Success){throw 'Cannot extract first-boot Windows answer-file XML template'}
+          [xml]$doc=$m.Groups[1].Value.Replace('REPLACE_LOCAL_PASSWORD','VM-SYNTHETICPASSWORD123!')
+          if(-not $doc.unattend){throw 'Broken OOBE answer file XML'}
+          $pass=@($doc.unattend.settings | ForEach-Object {$_.pass})
+          if($pass -notcontains 'oobeSystem'){throw 'Windows answer file has no oobeSystem pass'}
+          if($raw -notmatch 'TINY11_FIRST_LOGON_READY'){throw 'No prepared first-login marker hook'}
+          Write-Host 'PASS Windows OOBE XML and local user first-login hook'
+      - name: Validate same synthetic ZSTD disk under Windows QEMU
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & choco install qemu --version=2026.8.11 --yes --no-progress --limit-output
+          if($LASTEXITCODE -ne 0){throw 'QEMU Windows install failed'}
+          $root=Join-Path $env:RUNNER_TEMP 'tiny11-synthetic'
+          New-Item -ItemType Directory -Force $root | Out-Null
+          $raw=Join-Path $root 'input.raw'
+          $qcow=Join-Path $root 'tiny11-ready-zstd.qcow2'
+          [IO.File]::WriteAllBytes($raw, [byte[]]::new(64MB))
+          $exe='C:\Program Files\qemu\qemu-img.exe'
+          & $exe convert -c -f raw -O qcow2 -o 'compat=1.1,compression_type=zstd' $raw $qcow
+          if($LASTEXITCODE -ne 0){throw 'Windows ZSTD QCOW2 creation failed'}
+          $code=Join-Path $root 'OVMF_CODE.fd'
+          $vars=Join-Path $root 'OVMF_VARS.fd'
+          [IO.File]::WriteAllBytes($code,[byte[]]::new(4096))
+          [IO.File]::WriteAllBytes($vars,[byte[]]::new(4096))
+          Set-Content (Join-Path $root 'ready-credentials.txt') -Value 'SYNTHETIC TEST ONLY'
+          @'
+          import hashlib,json,sys
+          from pathlib import Path
+          p=Path(sys.argv[1])
+          def sha(f):return hashlib.sha256((p/f).read_bytes()).hexdigest()
+          meta={"schema":1,"disk":"tiny11-ready-zstd.qcow2","prepared_first_boot":True,
+           "install_required_on_next_start":False,"virtual_size_bytes":67108864,
+           "disk_sha256":sha("tiny11-ready-zstd.qcow2"),
+           "ovmf_code_sha256":sha("OVMF_CODE.fd"),"ovmf_vars_sha256":sha("OVMF_VARS.fd")}
+          (p/"tiny11-ready-manifest.json").write_text(json.dumps(meta))
+          '@ | python - $root
+          if($LASTEXITCODE -ne 0){throw 'Synthetic manifest generation failed'}
+          python windows-vm-runtime/dual-run.py verify --vm-dir $root
+          if($LASTEXITCODE -ne 0){throw 'Windows dual-run manifest verification failed'}
+          Write-Host 'PASS Windows runner ready disk integrity verification'
