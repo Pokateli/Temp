@@ -19,6 +19,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ovmf
           python3 -m pip install cryptography --break-system-packages --quiet
+      - name: Verify VM control and launch helpers syntax
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile windows-vm-runtime/vm-control.py windows-vm-runtime/dual-run.py windows-vm-runtime/ready-parts.py
+          bash -n windows-vm-runtime/bootstrap-chatgpt.sh
+          echo 'PASS: launch and QEMU monitor helpers pass Python/Bash syntax checks'
       - name: Construct SYNTHETIC qcow2 and ready manifest (NOT Windows)
         run: |
           set -Eeuo pipefail
