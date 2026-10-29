@@ -1,0 +1,82 @@
+name: Tiny11 stage shard transfer Windows to Ubuntu - cross-runner integrity
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - 'windows-vm-runtime/ready-parts.py'
+      - '.github/workflows/tiny11-stage-transport-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  create-windows-stage:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate non-Windows test data with identical stage filenames
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path synthetic-stage | Out-Null
+          @'
+          from pathlib import Path
+          import hashlib
+          root=Path("synthetic-stage")
+          with (root/"tiny11-zstd.qcow2").open("wb") as f:
+              for i in range(24):
+                  f.write(hashlib.sha256(f"synthetic-only:{i}".encode()).digest()*32768)
+          (root/"ready-credentials.txt").write_text("SYNTHETIC TEST ONLY - NOT WINDOWS")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'Synthetic file creation failed'}
+          python windows-vm-runtime/ready-parts.py pack synthetic-stage stage-parts-smoke --kind stage
+          if($LASTEXITCODE -ne 0){throw 'Stage pack failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-smoke-stage-index
+          path: stage-parts-smoke/stage-parts.json
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-smoke-stage-part-000
+          path: stage-parts-smoke/part-000.bin
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+  restore-linux-stage:
+    needs: create-windows-stage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tiny11-smoke-stage-index
+          path: synthetic-parts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tiny11-smoke-stage-part-*
+          path: synthetic-parts
+          merge-multiple: true
+      - name: Verify Windows-to-Linux artifact reassembly
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ls -lah synthetic-parts/
+          python3 windows-vm-runtime/ready-parts.py unpack synthetic-parts synthetic-restored --kind stage
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          root=Path('synthetic-restored')
+          f=root/'tiny11-zstd.qcow2'
+          assert f.stat().st_size==24*32*32768
+          with f.open('rb') as source:
+              for i in range(24):
+                  got=source.read(32*32768)
+                  assert got==hashlib.sha256(f'synthetic-only:{i}'.encode()).digest()*32768
+              assert source.read()==b''
+          assert (root/'ready-credentials.txt').read_text()=='SYNTHETIC TEST ONLY - NOT WINDOWS'
+          print('PASS: Windows uploader to Linux downloader produced byte-identical stage and credentials')
+          PY
