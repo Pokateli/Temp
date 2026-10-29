@@ -1,4 +1,4 @@
-name: Validate VHDX to compressed QCOW2 on Windows
+name: Validate native VHDX to ZSTD QCOW2 on Windows
 on:
   push:
     branches: [windows-tiny11-zstd-20261029]
@@ -11,46 +11,53 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
-      - name: Create GPT VHDX using Windows Storage cmdlets and verify ZSTD QCOW2
+      - name: Native DiskPart VHDX, GPT UEFI NTFS, Windows qemu-img ZSTD compare
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'native-vhdx-zstd'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $vhdx=Join-Path $root 'native.vhdx'
+          $qcow=Join-Path $root 'native-zstd.qcow2'
+          if((Test-Path 'Y:\') -or (Test-Path 'W:\')){throw 'Test drive letter already used'}
+          $create=Join-Path $root 'create.dps'
+          @(
+            ('CREATE VDISK FILE="{0}" MAXIMUM=2048 TYPE=EXPANDABLE' -f $vhdx),
+            ('SELECT VDISK FILE="{0}"' -f $vhdx),
+            'ATTACH VDISK',
+            'CONVERT GPT',
+            'CREATE PARTITION EFI SIZE=260',
+            'FORMAT QUICK FS=FAT32 LABEL="EFI"',
+            'ASSIGN LETTER=Y',
+            'CREATE PARTITION MSR SIZE=16',
+            'CREATE PARTITION PRIMARY',
+            'FORMAT QUICK FS=NTFS LABEL="Windows"',
+            'ASSIGN LETTER=W',
+            'EXIT'
+          )|Set-Content -Path $create -Encoding ASCII
+          & diskpart.exe /s $create | Out-Host
+          if(-not(Test-Path 'Y:\') -or -not(Test-Path 'W:\')){throw "Diskpart layout failed"}
+          [IO.File]::WriteAllBytes('W:\TEST.BIN',[byte[]]::new(8MB))
+          Set-Content 'Y:\UEFI_TEST.TXT' -Value 'UEFI_OK' -Encoding ASCII
+          Set-Content 'W:\TEST.TXT' -Value 'NTFS_OK' -Encoding ASCII
+          if(-not(Test-Path 'Y:\UEFI_TEST.TXT') -or -not(Test-Path 'W:\TEST.TXT')){throw "File IO failed"}
+          $det=Join-Path $root 'detach.dps'
+          @(
+            ('SELECT VDISK FILE="{0}"' -f $vhdx),
+            'DETACH VDISK',
+            'EXIT'
+          )|Set-Content -Path $det -Encoding ASCII
+          & diskpart.exe /s $det | Out-Host
           & choco install qemu --version=2026.8.11 --yes --no-progress --limit-output
           if($LASTEXITCODE -ne 0){throw "QEMU install failed"}
           $img='C:\Program Files\qemu\qemu-img.exe'
-          $root=Join-Path $env:RUNNER_TEMP 'vhdx-qcow2-check'
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
-          $vhdx=Join-Path $root 'probe.vhdx'
-          $qcow=Join-Path $root 'probe.qcow2'
-          & $img create -f vhdx -o subformat=dynamic $vhdx 1024M
-          if($LASTEXITCODE -ne 0){throw 'VHDX creation failed'}
-          $mounted=$false
-          try {
-            $mountedObj=Mount-DiskImage -ImagePath $vhdx -StorageType VHD -PassThru -ErrorAction Stop
-            $mounted=$true
-            $disk=($mountedObj|Get-Disk)
-            if($disk.IsOffline){Set-Disk -Number $disk.Number -IsOffline $false}
-            if($disk.IsReadOnly){Set-Disk -Number $disk.Number -IsReadOnly $false}
-            Initialize-Disk -Number $disk.Number -PartitionStyle GPT -ErrorAction Stop
-            $part=New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
-            $vol=Format-Volume -Partition $part -FileSystem NTFS -NewFileSystemLabel VHDXTEST -Confirm:$false
-            $letter=$part.DriveLetter
-            if(-not $letter){throw "No drive letter for VHDX partition"}
-            Write-Host "Virtual test disk assigned $letter"
-            $file="$($letter):\PAYLOAD.BIN"
-            [System.IO.File]::WriteAllBytes($file, (New-Object byte[] (32MB)))
-            Set-Content "$($letter):\READY.TXT" -Value DISKPART_OK -Encoding ASCII
-            if(-not(Test-Path $file)){throw 'Test payload not written'}
-          } finally {
-            if($mounted){Dismount-DiskImage -ImagePath $vhdx -ErrorAction Stop | Out-Null}
-          }
           & $img convert -c -f vhdx -O qcow2 -o 'compat=1.1,compression_type=zstd' $vhdx $qcow
-          if($LASTEXITCODE -ne 0){throw 'Conversion failed'}
-          $info=(& $img info --output=json $qcow | Out-String)|ConvertFrom-Json
-          $maps=(& $img map --output=json $qcow | Out-String)|ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw "Native VHDX convert failed"}
           & $img compare -f vhdx -F qcow2 $vhdx $qcow
-          if($LASTEXITCODE -ne 0){throw 'VHDX-QCOW2 compare failed'}
-          $compressed=@($maps|Where-Object {$_.compressed -eq $true}).Count
-          if($compressed -eq 0){throw 'No compressed clusters'}
-          if(($info|ConvertTo-Json -Depth 10) -notmatch 'zstd'){throw 'No zstd metadata'}
-          Write-Host "PASS: VHDX to ZSTD-QCOW2 compressed extents=$compressed; source=$((Get-Item $vhdx).Length) bytes, qcow=$((Get-Item $qcow).Length) bytes"
+          if($LASTEXITCODE -ne 0){throw "Data mismatch"}
+          $info=(& $img info --output=json $qcow | Out-String)|ConvertFrom-Json
+          $map=(& $img map --output=json $qcow | Out-String)|ConvertFrom-Json
+          $n=@($map|Where-Object {$_.compressed -eq $true}).Count
+          if($n -le 0){throw "No compressed extents"}
+          if(($info|ConvertTo-Json -Depth 10) -notmatch 'zstd'){throw "ZSTD metadata missing"}
+          Write-Host "PASS native Windows VHDX -> ZSTD QCOW2, compressed extents=$n, source bytes=$((Get-Item $vhdx).Length), result bytes=$((Get-Item $qcow).Length)"
