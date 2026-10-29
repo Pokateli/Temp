@@ -11,6 +11,8 @@ if [ -z "${QEMU_HOME:-}" ]; then
   for candidate in \
     /mnt/data/tiny11-qemu-runtime-linux-amd64 \
     /mnt/data/tiny11-portable-qemu/tiny11-qemu-runtime-linux-amd64 \
+    /mnt/data/tiny11-portable-qemu/debian13-chatgpt-vm \
+    /mnt/data/tiny11-local-qemu/debian13-chatgpt-vm \
     /mnt/data/debian13-chatgpt-vm \
     /mnt/data/debian13-qemu-bundle \
     /mnt/data/tiny11-local-sandbox/debian13-qemu-bundle \
