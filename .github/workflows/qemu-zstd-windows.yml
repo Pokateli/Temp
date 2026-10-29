@@ -38,8 +38,8 @@ jobs:
           $img='C:\Program Files\qemu\qemu-img.exe'
           & $img convert -c -f raw -O qcow2 -o 'compat=1.1,compression_type=zstd' $raw $qcow
           if ($LASTEXITCODE -ne 0) { throw "Windows qemu-img lacks ZSTD support" }
-          $info=& $img info --output=json $qcow | ConvertFrom-Json
-          $map=& $img map --output=json $qcow | ConvertFrom-Json
+          $info=(& $img info --output=json $qcow | Out-String) | ConvertFrom-Json
+          $map=(& $img map --output=json $qcow | Out-String) | ConvertFrom-Json
           & $img compare -f raw -F qcow2 $raw $qcow
           if ($LASTEXITCODE -ne 0) { throw "Data mismatch after Windows ZSTD convert" }
           $compressed=@($map|Where-Object {$_.compressed -eq $true}).Count
