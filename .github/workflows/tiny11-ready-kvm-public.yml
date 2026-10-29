@@ -1,0 +1,440 @@
+name: Tiny11 KVM ready disk - public unencrypted dev artifacts
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths: ['.github/workflows/tiny11-ready-kvm-public.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-stage:
+    runs-on: windows-2022
+    timeout-minutes: 230
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate build scripts before ISO download
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($f in @('tiny11-qcow2-lab/prepare-tiny11-wim.ps1','tiny11-qcow2-lab/apply-tiny11-ready.ps1')){
+            $tok=$null;$errors=$null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tok,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|Out-Host;throw "PowerShell syntax invalid: $f"}
+          }
+          python -m py_compile windows-vm-runtime/finalize-ready-kvm.py windows-vm-runtime/dual-run.py windows-vm-runtime/ready-parts.py
+          if($LASTEXITCODE -ne 0){throw 'Python scripts did not compile'}
+      - name: 1. Download official Microsoft evaluation ISO with SHA256 verification
+        shell: pwsh
+        timeout-minutes: 20
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Download
+      - name: 2. Build customized Tiny11 install.wim via DISM
+        shell: pwsh
+        timeout-minutes: 85
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Build
+      - name: 3. Install Tiny11 UEFI Windows system into compressed ZSTD QCOW2
+        shell: pwsh
+        timeout-minutes: 60
+        run: ./tiny11-qcow2-lab/apply-tiny11-ready.ps1
+      - name: Hash exact pre-first-login disk and local development credentials
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'tiny11-lab'
+          $names=@('tiny11-zstd.qcow2','ready-credentials.txt')
+          $lines=@()
+          foreach($name in $names){
+            $p=Join-Path $root $name
+            if(-not(Test-Path $p)){throw "Missing Windows stage asset: $name"}
+            $hash=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()
+            $lines+=("$hash *$name")
+          }
+          $lines|Set-Content -Path (Join-Path $root 'STAGE-SHA256SUMS') -Encoding ASCII
+          Write-Host 'Stage SHA256 manifest prepared. This public development workflow intentionally publishes plaintext Windows stage and local credentials.'
+      - uses: actions/upload-artifact@v4
+        name: Temporary UNENCRYPTED Windows installation-stage transfer (user-approved)
+        with:
+          name: tiny11-kvm-stage-plain
+          path: |
+            ${{ runner.temp }}/tiny11-lab/tiny11-zstd.qcow2
+            ${{ runner.temp }}/tiny11-lab/ready-credentials.txt
+            ${{ runner.temp }}/tiny11-lab/STAGE-SHA256SUMS
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload non-OS diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-kvm-build-logs
+          path: tiny11-qcow2-logs/
+          retention-days: 7
+          if-no-files-found: warn
+  ubuntu-kvm:
+    needs: windows-stage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 155
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reclaim Ubuntu runner disk space for Windows VM
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          df -h .
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          df -h .
+      - name: Install KVM, QEMU ZSTD and OVMF
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ovmf
+          test -c /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          test -w /dev/kvm
+          test -f /usr/share/OVMF/OVMF_CODE_4M.fd
+          test -f /usr/share/OVMF/OVMF_VARS_4M.fd
+          qemu-system-x86_64 --version
+      - uses: actions/download-artifact@v4
+        name: Download temporary UNENCRYPTED development stage
+        with:
+          name: tiny11-kvm-stage-plain
+          path: ${{ runner.temp }}/tiny11-kvm-stage
+      - name: Verify Windows stage SHA256 and available disk
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$RUNNER_TEMP/tiny11-kvm-stage"
+          sha256sum -c STAGE-SHA256SUMS
+          qemu-img info tiny11-zstd.qcow2
+          df -h .
+      - name: Boot real Windows OOBE under Linux KVM and require clean shutdown
+        shell: bash
+        timeout-minutes: 65
+        run: |
+          set -Eeuo pipefail
+          python3 windows-vm-runtime/finalize-ready-kvm.py --vm-dir "$RUNNER_TEMP/tiny11-kvm-stage" --seconds 3400
+      - name: Verify ZSTD ready image and confirm second Windows boot under KVM
+        shell: bash
+        timeout-minutes: 28
+        run: |
+          set -Eeuo pipefail
+          python3 windows-vm-runtime/dual-run.py verify --vm-dir "$RUNNER_TEMP/tiny11-kvm-stage"
+          python3 windows-vm-runtime/dual-run.py probe --vm-dir "$RUNNER_TEMP/tiny11-kvm-stage" --accelerator kvm --headless --seconds 1400
+          grep -q '"boot_confirmed": true' "$RUNNER_TEMP/tiny11-kvm-stage/probe-result.json"
+      - name: Remove redundant first-boot stage and stream ready kit into 384MiB public shards
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/tiny11-kvm-stage"
+          rm -f "$root/tiny11-zstd.qcow2" "$root/tiny11-firstboot.qcow2" "$root/tiny11-session.qcow2"
+          df -h .
+          python3 windows-vm-runtime/ready-parts.py pack "$root" tiny11-public-parts
+          python3 -c 'import json; p=json.load(open("tiny11-public-parts/ready-parts.json")); assert len(p["parts"])<=32, "Ready disk needs more than 32 transfer shards"'
+      - uses: actions/upload-artifact@v4
+        name: Upload public ready image index
+        with:
+          name: tiny11-ready-public-index
+          path: tiny11-public-parts/ready-parts.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload public diagnostic proof without OS image
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-kvm-guest-proof
+          path: |
+            ${{ runner.temp }}/tiny11-kvm-stage/firstboot-qemu.log
+            ${{ runner.temp }}/tiny11-kvm-stage/firstboot-serial.log
+            ${{ runner.temp }}/tiny11-kvm-stage/qemu-serial.log
+            ${{ runner.temp }}/tiny11-kvm-stage/qemu-probe.log
+            ${{ runner.temp }}/tiny11-kvm-stage/probe-result.json
+          retention-days: 7
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 000
+        if: ${{ hashFiles('tiny11-public-parts/part-000.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-000
+          path: tiny11-public-parts/part-000.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 001
+        if: ${{ hashFiles('tiny11-public-parts/part-001.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-001
+          path: tiny11-public-parts/part-001.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 002
+        if: ${{ hashFiles('tiny11-public-parts/part-002.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-002
+          path: tiny11-public-parts/part-002.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 003
+        if: ${{ hashFiles('tiny11-public-parts/part-003.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-003
+          path: tiny11-public-parts/part-003.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 004
+        if: ${{ hashFiles('tiny11-public-parts/part-004.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-004
+          path: tiny11-public-parts/part-004.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 005
+        if: ${{ hashFiles('tiny11-public-parts/part-005.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-005
+          path: tiny11-public-parts/part-005.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 006
+        if: ${{ hashFiles('tiny11-public-parts/part-006.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-006
+          path: tiny11-public-parts/part-006.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 007
+        if: ${{ hashFiles('tiny11-public-parts/part-007.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-007
+          path: tiny11-public-parts/part-007.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 008
+        if: ${{ hashFiles('tiny11-public-parts/part-008.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-008
+          path: tiny11-public-parts/part-008.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 009
+        if: ${{ hashFiles('tiny11-public-parts/part-009.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-009
+          path: tiny11-public-parts/part-009.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 010
+        if: ${{ hashFiles('tiny11-public-parts/part-010.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-010
+          path: tiny11-public-parts/part-010.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 011
+        if: ${{ hashFiles('tiny11-public-parts/part-011.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-011
+          path: tiny11-public-parts/part-011.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 012
+        if: ${{ hashFiles('tiny11-public-parts/part-012.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-012
+          path: tiny11-public-parts/part-012.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 013
+        if: ${{ hashFiles('tiny11-public-parts/part-013.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-013
+          path: tiny11-public-parts/part-013.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 014
+        if: ${{ hashFiles('tiny11-public-parts/part-014.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-014
+          path: tiny11-public-parts/part-014.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 015
+        if: ${{ hashFiles('tiny11-public-parts/part-015.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-015
+          path: tiny11-public-parts/part-015.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 016
+        if: ${{ hashFiles('tiny11-public-parts/part-016.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-016
+          path: tiny11-public-parts/part-016.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 017
+        if: ${{ hashFiles('tiny11-public-parts/part-017.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-017
+          path: tiny11-public-parts/part-017.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 018
+        if: ${{ hashFiles('tiny11-public-parts/part-018.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-018
+          path: tiny11-public-parts/part-018.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 019
+        if: ${{ hashFiles('tiny11-public-parts/part-019.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-019
+          path: tiny11-public-parts/part-019.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 020
+        if: ${{ hashFiles('tiny11-public-parts/part-020.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-020
+          path: tiny11-public-parts/part-020.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 021
+        if: ${{ hashFiles('tiny11-public-parts/part-021.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-021
+          path: tiny11-public-parts/part-021.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 022
+        if: ${{ hashFiles('tiny11-public-parts/part-022.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-022
+          path: tiny11-public-parts/part-022.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 023
+        if: ${{ hashFiles('tiny11-public-parts/part-023.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-023
+          path: tiny11-public-parts/part-023.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 024
+        if: ${{ hashFiles('tiny11-public-parts/part-024.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-024
+          path: tiny11-public-parts/part-024.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 025
+        if: ${{ hashFiles('tiny11-public-parts/part-025.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-025
+          path: tiny11-public-parts/part-025.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 026
+        if: ${{ hashFiles('tiny11-public-parts/part-026.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-026
+          path: tiny11-public-parts/part-026.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 027
+        if: ${{ hashFiles('tiny11-public-parts/part-027.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-027
+          path: tiny11-public-parts/part-027.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 028
+        if: ${{ hashFiles('tiny11-public-parts/part-028.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-028
+          path: tiny11-public-parts/part-028.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 029
+        if: ${{ hashFiles('tiny11-public-parts/part-029.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-029
+          path: tiny11-public-parts/part-029.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 030
+        if: ${{ hashFiles('tiny11-public-parts/part-030.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-030
+          path: tiny11-public-parts/part-030.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Upload Tiny11 unencrypted ready shard 031
+        if: ${{ hashFiles('tiny11-public-parts/part-031.bin') != '' }}
+        with:
+          name: tiny11-ready-public-shard-031
+          path: tiny11-public-parts/part-031.bin
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
