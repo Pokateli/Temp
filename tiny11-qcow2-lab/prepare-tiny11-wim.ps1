@@ -84,9 +84,9 @@ exit 0
         Write-Host ("TINY11 HEARTBEAT elapsed={0}m stdout_bytes={1} running={2}" -f $elapsed,$size,(-not $p.HasExited))
         $last|ForEach-Object {Write-Host $_}
         if($p.HasExited){break}
-        if($elapsed -ge 54){
+        if($elapsed -ge 75){
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-            throw 'Tiny11 WIM Builder exceeded bounded 54-minute build window'
+            throw 'Tiny11 WIM Builder exceeded bounded 75-minute build window'
         }
     }
     Write-Host "Tiny11 Builder exit code: $($p.ExitCode)"
