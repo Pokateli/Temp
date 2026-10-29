@@ -50,14 +50,310 @@ jobs:
           }
           $lines|Set-Content -Path (Join-Path $root 'STAGE-SHA256SUMS') -Encoding ASCII
           Write-Host 'Stage SHA256 manifest prepared. This public development workflow intentionally publishes plaintext Windows stage and local credentials.'
+      - name: Split first-login Windows QCOW2 and credentials into independently verified 384MiB shards
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'tiny11-lab'
+          python windows-vm-runtime/ready-parts.py pack $root tiny11-stage-shards --kind stage
+          if($LASTEXITCODE -ne 0){throw 'Failed to shard 8GiB stage'}
+          $index=Get-Content 'tiny11-stage-shards/stage-parts.json' -Raw | ConvertFrom-Json
+          if(@($index.parts).Count -gt 32){throw 'Stage has too many shards for CI upload'}
+          Write-Host "Stage split into $(@($index.parts).Count) artifacts <= 384MiB"
       - uses: actions/upload-artifact@v4
-        name: Temporary UNENCRYPTED Windows installation-stage transfer (user-approved)
+        name: Transfer manifest for SHA256 verified Windows stage shards
         with:
-          name: tiny11-kvm-stage-plain
-          path: |
-            ${{ runner.temp }}/tiny11-lab/tiny11-zstd.qcow2
-            ${{ runner.temp }}/tiny11-lab/ready-credentials.txt
-            ${{ runner.temp }}/tiny11-lab/STAGE-SHA256SUMS
+          name: tiny11-kvm-stage-index
+          path: tiny11-stage-shards/stage-parts.json
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 000 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-000.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-000
+          path: tiny11-stage-shards/part-000.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 001 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-001.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-001
+          path: tiny11-stage-shards/part-001.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 002 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-002.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-002
+          path: tiny11-stage-shards/part-002.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 003 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-003.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-003
+          path: tiny11-stage-shards/part-003.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 004 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-004.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-004
+          path: tiny11-stage-shards/part-004.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 005 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-005.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-005
+          path: tiny11-stage-shards/part-005.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 006 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-006.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-006
+          path: tiny11-stage-shards/part-006.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 007 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-007.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-007
+          path: tiny11-stage-shards/part-007.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 008 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-008.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-008
+          path: tiny11-stage-shards/part-008.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 009 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-009.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-009
+          path: tiny11-stage-shards/part-009.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 010 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-010.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-010
+          path: tiny11-stage-shards/part-010.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 011 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-011.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-011
+          path: tiny11-stage-shards/part-011.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 012 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-012.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-012
+          path: tiny11-stage-shards/part-012.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 013 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-013.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-013
+          path: tiny11-stage-shards/part-013.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 014 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-014.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-014
+          path: tiny11-stage-shards/part-014.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 015 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-015.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-015
+          path: tiny11-stage-shards/part-015.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 016 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-016.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-016
+          path: tiny11-stage-shards/part-016.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 017 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-017.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-017
+          path: tiny11-stage-shards/part-017.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 018 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-018.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-018
+          path: tiny11-stage-shards/part-018.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 019 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-019.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-019
+          path: tiny11-stage-shards/part-019.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 020 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-020.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-020
+          path: tiny11-stage-shards/part-020.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 021 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-021.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-021
+          path: tiny11-stage-shards/part-021.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 022 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-022.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-022
+          path: tiny11-stage-shards/part-022.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 023 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-023.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-023
+          path: tiny11-stage-shards/part-023.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 024 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-024.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-024
+          path: tiny11-stage-shards/part-024.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 025 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-025.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-025
+          path: tiny11-stage-shards/part-025.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 026 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-026.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-026
+          path: tiny11-stage-shards/part-026.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 027 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-027.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-027
+          path: tiny11-stage-shards/part-027.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 028 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-028.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-028
+          path: tiny11-stage-shards/part-028.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 029 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-029.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-029
+          path: tiny11-stage-shards/part-029.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 030 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-030.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-030
+          path: tiny11-stage-shards/part-030.bin
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        name: Transfer Windows stage shard 031 (384 MiB max)
+        if: ${{ hashFiles('tiny11-stage-shards/part-031.bin') != '' }}
+        with:
+          name: tiny11-kvm-stage-part-031
+          path: tiny11-stage-shards/part-031.bin
           compression-level: 0
           retention-days: 1
           if-no-files-found: error
@@ -95,10 +391,30 @@ jobs:
           test -f /usr/share/OVMF/OVMF_VARS_4M.fd
           qemu-system-x86_64 --version
       - uses: actions/download-artifact@v4
-        name: Download temporary UNENCRYPTED development stage
+        name: Download stage shard integrity index
         with:
-          name: tiny11-kvm-stage-plain
-          path: ${{ runner.temp }}/tiny11-kvm-stage
+          name: tiny11-kvm-stage-index
+          path: tiny11-stage-shards/
+      - uses: actions/download-artifact@v4
+        name: Download all 384MiB stage shards with native action ZIPs
+        with:
+          pattern: tiny11-kvm-stage-part-*
+          path: tiny11-stage-shards/
+          merge-multiple: true
+      - name: Reassemble exact SHA256-verified Windows stage disk and credentials
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          set -Eeuo pipefail
+          df -h .
+          python3 windows-vm-runtime/ready-parts.py unpack tiny11-stage-shards "$RUNNER_TEMP/tiny11-kvm-stage" --kind stage
+          cd "$RUNNER_TEMP/tiny11-kvm-stage"
+          test -s tiny11-zstd.qcow2 && test -s ready-credentials.txt
+          sha256sum tiny11-zstd.qcow2 ready-credentials.txt
+          cd "$GITHUB_WORKSPACE"
+          rm -rf tiny11-stage-shards
+          echo 'PASS: all stage chunks and both files individually verified before boot'
+          df -h .
       - name: Verify Windows stage SHA256 and available disk
         shell: bash
         run: |
