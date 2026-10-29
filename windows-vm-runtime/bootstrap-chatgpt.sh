@@ -6,7 +6,30 @@ RUNTIME="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 READY_DIR="${READY_DIR:-/mnt/data/tiny11-ready}"
 ENCRYPTED_DIR="${ENCRYPTED_DIR:-/mnt/data/tiny11-ready-encrypted}"
 ACTION="${1:-verify}"
-QEMU_HOME="${QEMU_HOME:-/mnt/data/debian13-chatgpt-vm}"
+if [ -z "${QEMU_HOME:-}" ]; then
+  for candidate in \
+    /mnt/data/debian13-chatgpt-vm \
+    /mnt/data/debian13-qemu-bundle \
+    /mnt/data/tiny11-local-sandbox/debian13-qemu-bundle \
+    /mnt/data/tiny11-portable-qemu/debian13-qemu-bundle; do
+    if [ -x "$candidate/bin/qemu-system-x86_64" ] && [ -x "$candidate/bin/qemu-img" ]; then
+      QEMU_HOME="$candidate"
+      break
+    fi
+  done
+  if [ -z "${QEMU_HOME:-}" ]; then
+    portable_zip=/mnt/data/debian13-qemu-tcg-bundle.zip
+    if [ ! -f "$portable_zip" ]; then
+      echo "Portable QEMU kit missing: $portable_zip. Set QEMU_HOME to an extracted compatible portable kit." >&2
+      exit 2
+    fi
+    echo "Preparing portable QEMU TCG from existing Debian13 kit (no system installation)"
+    mkdir -p /mnt/data/tiny11-portable-qemu
+    unzip -p "$portable_zip" debian13-qemu-bundle.tar.gz | tar -xz -C /mnt/data/tiny11-portable-qemu
+    QEMU_HOME=/mnt/data/tiny11-portable-qemu/debian13-qemu-bundle
+  fi
+fi
+export QEMU_HOME
 if [ ! -f "$READY_DIR/tiny11-ready-manifest.json" ]; then
   if [ ! -f "$ENCRYPTED_DIR/envelope.json" ]; then
     echo "No ready disk found. Supply encrypted GitHub artifact parts into $ENCRYPTED_DIR" >&2
