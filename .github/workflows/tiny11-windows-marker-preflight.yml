@@ -64,6 +64,15 @@ jobs:
           if($serialErrors.Count){$serialErrors|Out-Host;throw 'Guest COM1 proof script syntax is invalid'}
           if($serialCode -notmatch 'TINY11_INSTALLED_READY SECOND_BOOT_CONFIRMED'){throw 'Second boot serial marker missing'}
           Write-Host 'PASS: Windows guest COM1 readiness proof PowerShell syntax'
+          # Instantiate the exact constructor used in the Windows guest without
+          # opening COM1; this catches errors that syntax-only tests miss.
+          $port=[System.IO.Ports.SerialPort]::new("COM1",115200,[System.IO.Ports.Parity]::None,8,[System.IO.Ports.StopBits]::One)
+          try {
+            if($port.PortName -ne 'COM1' -or $port.BaudRate -ne 115200 -or $port.DataBits -ne 8){
+              throw 'Guest serial constructor properties do not match COM1 protocol'
+            }
+          } finally { $port.Dispose() }
+          Write-Host 'PASS: Guest COM1 SerialPort constructor executes on Windows runner'
           if($raw -notmatch 'TINY11_FIRST_LOGON_READY'){throw 'Missing first login proof'}
           if($raw -notmatch 'shutdown.exe /s /f /t 5'){throw 'No clean guest shutdown command'}
           Write-Host 'PASS: ready-disk Windows first login and shutdown hook present'
