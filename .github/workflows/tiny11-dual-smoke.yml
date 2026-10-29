@@ -1,0 +1,68 @@
+name: Dual Tiny11 runtime: integrity, encrypted transfer, QEMU TCG smoke
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths: ['.github/workflows/tiny11-dual-smoke.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-sandbox-compatible:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Debian-compatible QEMU TCG and minimal encryption dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ovmf
+          python3 -m pip install cryptography --break-system-packages --quiet
+      - name: Construct SYNTHETIC qcow2 and ready manifest (NOT Windows)
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/tiny11-test
+          truncate -s 64M /tmp/tiny11-test/raw.img
+          printf 'SYNTHETIC_QCOW2_TEST' | dd of=/tmp/tiny11-test/raw.img bs=1 seek=1024 conv=notrunc status=none
+          qemu-img convert -c -f raw -O qcow2 -o compat=1.1,compression_type=zstd \
+            /tmp/tiny11-test/raw.img /tmp/tiny11-test/tiny11-ready-zstd.qcow2
+          cp /usr/share/OVMF/OVMF_CODE_4M.fd /tmp/tiny11-test/OVMF_CODE.fd
+          cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/tiny11-test/OVMF_VARS.fd
+          printf 'SYNTHETIC TEST - no Windows account' > /tmp/tiny11-test/ready-credentials.txt
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          p=pathlib.Path('/tmp/tiny11-test')
+          h=lambda x:hashlib.sha256((p/x).read_bytes()).hexdigest()
+          o={
+            "schema":1,"prepared_first_boot":True,"install_required_on_next_start":False,
+            "disk":"tiny11-ready-zstd.qcow2",
+            "disk_sha256":h('tiny11-ready-zstd.qcow2'),
+            "ovmf_code_sha256":h('OVMF_CODE.fd'),
+            "ovmf_vars_sha256":h('OVMF_VARS.fd'),
+            "virtual_size_bytes":64*1024*1024,
+            "compression":"zstd","default_user":"synthetic-only"
+          }
+          (p/'tiny11-ready-manifest.json').write_text(json.dumps(o,indent=2))
+          (p/'SHA256SUMS').write_text('synthetic only')
+          PY
+      - name: Verify compressed ready disk structure and QEMU overlay on Ubuntu
+        run: |
+          python3 windows-vm-runtime/dual-run.py verify --vm-dir /tmp/tiny11-test
+          # Boot firmware with a synthetic (non-Windows) disk. A Windows ready
+          # marker must NOT be generated: this test only checks TCG and overlays.
+          if python3 windows-vm-runtime/dual-run.py probe --vm-dir /tmp/tiny11-test --headless --seconds 12;then
+            echo 'ERROR: synthetic VM incorrectly declared Windows booted'
+            exit 1
+          fi
+          test -s /tmp/tiny11-test/tiny11-session.qcow2
+          test -s /tmp/tiny11-test/OVMF_VARS-session.fd
+          test -f /tmp/tiny11-test/probe-result.json
+          echo 'PASS QEMU TCG, independent session overlay, and correctly negative fake-Windows boot'
+      - name: Verify AES-256-GCM transfer and reconstructed ready-image hashes
+        env:
+          TINY11_ARCHIVE_PASSPHRASE: 'TEST-ONLY-SYNTHETIC-NOT-A-REAL-SECRET'
+        run: |
+          python3 windows-vm-runtime/secure-bundle.py encrypt /tmp/tiny11-test /tmp/tiny11-encrypted
+          python3 windows-vm-runtime/secure-bundle.py decrypt /tmp/tiny11-encrypted /tmp/tiny11-restored
+          python3 windows-vm-runtime/dual-run.py verify --vm-dir /tmp/tiny11-restored
+          cmp /tmp/tiny11-test/tiny11-ready-zstd.qcow2 /tmp/tiny11-restored/tiny11-ready-zstd.qcow2
+          echo 'PASS encrypted chunked transport, decrypted base disk and OVMF'
