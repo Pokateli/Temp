@@ -1,4 +1,4 @@
-name: Dual Tiny11 runtime: integrity, encrypted transfer, QEMU TCG smoke
+name: "Dual Tiny11 runtime - integrity, encrypted transfer, QEMU TCG smoke"
 on:
   push:
     branches: [windows-tiny11-dual-ready-20261029]
