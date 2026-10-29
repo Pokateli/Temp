@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/tiny11-dual-lint.yml'
       - '.github/workflows/tiny11-ready-run.yml'
+      - '.github/workflows/tiny11-ready-build-rsa.yml'
       - 'windows-vm-runtime/bootstrap-chatgpt.sh'
       - 'windows-vm-runtime/dual-run.py'
   workflow_dispatch:
@@ -23,6 +24,7 @@ jobs:
           import yaml
           for f in ('.github/workflows/tiny11-ready-run.yml',
                     '.github/workflows/tiny11-ready-build.yml',
+                    '.github/workflows/tiny11-ready-build-rsa.yml',
                     '.github/workflows/tiny11-dual-smoke.yml',
                     '.github/workflows/tiny11-dual-lint.yml'):
               y=yaml.safe_load(open(f,encoding='utf-8'))
