@@ -1,0 +1,40 @@
+name: Tiny11 dual workflow syntax and runner preflight
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - '.github/workflows/tiny11-dual-lint.yml'
+      - '.github/workflows/tiny11-ready-run.yml'
+      - 'windows-vm-runtime/bootstrap-chatgpt.sh'
+      - 'windows-vm-runtime/dual-run.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate YAML syntax of build and run actions
+        run: |
+          python3 -m pip install --quiet --break-system-packages PyYAML
+          python3 - <<'PY'
+          import yaml
+          for f in ('.github/workflows/tiny11-ready-run.yml',
+                    '.github/workflows/tiny11-ready-build.yml',
+                    '.github/workflows/tiny11-dual-smoke.yml',
+                    '.github/workflows/tiny11-dual-lint.yml'):
+              y=yaml.safe_load(open(f,encoding='utf-8'))
+              assert 'jobs' in y and y['jobs'], (f,y)
+              assert 'on' in y or True in y, (f,y)
+              print('PASS workflow YAML:',f,'jobs',list(y['jobs']))
+          PY
+      - name: Check PowerShell duplicate corruption, Bash and Python code
+        run: |
+          set -Eeuo pipefail
+          bash -n windows-vm-runtime/bootstrap-chatgpt.sh
+          python3 -m py_compile windows-vm-runtime/dual-run.py windows-vm-runtime/secure-bundle.py
+          test "$(grep -c 'Download encrypted ready disk built earlier' .github/workflows/tiny11-ready-run.yml || true)" = 0
+          test "$(grep -c 'Download encrypted prepared Windows disk artifact' .github/workflows/tiny11-ready-run.yml)" = 1
+          echo "PASS no truncated or duplicated Windows ready-run workflow"
