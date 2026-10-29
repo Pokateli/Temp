@@ -58,10 +58,10 @@ $confirmed=$false
 $started=Get-Date
 $shots=@{}
 try {
-  while(((Get-Date)-$started).TotalSeconds -lt 1050){
+  while(((Get-Date)-$started).TotalSeconds -lt 1500){
     Start-Sleep -Seconds 10
     $sec=[int]((Get-Date)-$started).TotalSeconds
-    foreach($point in @(60,180,420,840)){
+    foreach($point in @(60,180,420,840,1320)){
       if($sec -ge $point -and -not $shots.ContainsKey($point)){
         $shots[$point]=$true
         Save-Screen $point
