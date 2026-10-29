@@ -1,0 +1,65 @@
+name: Tiny11 Audit Mode TCG boot + ZSTD QCOW2
+on:
+  push:
+    branches: [windows-tiny11-audit-20261029]
+    paths:
+      - '.github/workflows/tiny11-audit-mode.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit-boot:
+    runs-on: windows-2022
+    timeout-minutes: 220
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell syntax and Microsoft unattend XML
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files=@(
+            'tiny11-qcow2-lab/prepare-tiny11-wim.ps1',
+            'tiny11-qcow2-lab/apply-tiny11-wim.ps1',
+            'tiny11-qcow2-lab/test-tiny11-boot.ps1'
+          )
+          foreach($path in $files){
+            $tok=$null;$issues=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path).Path,[ref]$tok,[ref]$issues)|Out-Null
+            if($issues.Count){$issues|Out-Host;throw "Invalid PowerShell $path"}
+            Write-Host "PASS PowerShell parser: $path"
+          }
+          $answer='windows-vm-runtime/audit-unattend.xml'
+          [xml]$unattend=Get-Content -LiteralPath $answer -Raw
+          $passes=@($unattend.unattend.settings | ForEach-Object { $_.pass })
+          foreach($needed in @('specialize','oobeSystem','auditUser')){
+            if($passes -notcontains $needed){throw "Unattend missing pass: $needed"}
+          }
+          Write-Host "PASS Windows unattended passes: $($passes -join ', ')"
+      - name: Stage 1 - Download Microsoft Windows evaluation ISO and verify SHA256
+        shell: pwsh
+        timeout-minutes: 20
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Download
+      - name: Stage 2 - Build pinned Tiny11 serviced WIM
+        shell: pwsh
+        timeout-minutes: 79
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Build
+      - name: Stage 3 - Apply Tiny11 Audit WIM into VHDX then ZSTD QCOW2
+        shell: pwsh
+        timeout-minutes: 60
+        run: ./tiny11-qcow2-lab/apply-tiny11-wim.ps1
+      - name: Stage 4 - Prove specialize and Audit desktop inside QEMU TCG, 2560MB
+        shell: pwsh
+        timeout-minutes: 43
+        run: ./tiny11-qcow2-lab/test-tiny11-boot.ps1
+      - name: Upload diagnostic logs only, never Windows OS images
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tiny11-audit-tcg-diagnostics
+          path: tiny11-qcow2-logs/
+          retention-days: 14
+          if-no-files-found: warn
