@@ -1,0 +1,34 @@
+name: Prepare open-source OVMF firmware for Tiny11 sandbox VM
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths:
+      - '.github/workflows/ovmf-for-tiny11.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ovmf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install official Ubuntu OVMF package
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ovmf qemu-system-x86
+          mkdir -p output
+          ls -lah /usr/share/OVMF/
+          cp /usr/share/OVMF/OVMF_CODE_4M.fd output/OVMF_CODE.fd
+          cp /usr/share/OVMF/OVMF_VARS_4M.fd output/OVMF_VARS.fd
+          (cd output && sha256sum OVMF_CODE.fd OVMF_VARS.fd > SHA256SUMS)
+          timeout 8s qemu-system-x86_64 -machine pc,accel=tcg -cpu max -m 512 -smp 1 \
+            -display none -monitor none -nic none \
+            -drive if=pflash,format=raw,readonly=on,file=output/OVMF_CODE.fd \
+            -drive if=pflash,format=raw,file=output/OVMF_VARS.fd || status=$?
+          test "${status:-0}" = 124 || test "${status:-0}" = 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ovmf-uefi-firmware
+          path: output/
+          retention-days: 30
