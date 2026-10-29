@@ -18,13 +18,22 @@ import sys
 CHUNK_SIZE=128*1024*1024
 FILES=("tiny11-ready-zstd.qcow2","OVMF_CODE.fd","OVMF_VARS.fd",
        "tiny11-ready-manifest.json","ready-credentials.txt","SHA256SUMS")
+# Temporary stage is always encrypted: a public GitHub Actions artifact must
+# never contain the Windows install-stage QCOW2 or account credentials.
+FILESETS={"ready":FILES,"stage":("tiny11-zstd.qcow2","ready-credentials.txt")}
 def sha(buf):return hashlib.sha256(buf).hexdigest()
 def main():
     a=argparse.ArgumentParser()
     a.add_argument("mode",choices=("encrypt","decrypt"))
     a.add_argument("source",type=Path)
     a.add_argument("destination",type=Path)
+    a.add_argument("--kind",choices=("ready","stage"),default="ready")
+    a.add_argument("--consume-chunks",action="store_true",
+                   help="delete authenticated stage chunks after writing each decrypted one to reduce peak disk use")
     x=a.parse_args()
+    if x.consume_chunks and (x.mode!="decrypt" or x.kind!="stage"):
+        raise SystemExit("--consume-chunks is supported only when decrypting the stage artifact")
+    selected_files=FILESETS[x.kind]
     secret=os.environ.get("TINY11_ARCHIVE_PASSPHRASE","")
     if len(secret)<16:raise SystemExit("TINY11_ARCHIVE_PASSPHRASE missing or under 16 characters")
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -35,17 +44,22 @@ def main():
         manifest=json.loads((x.source/"envelope.json").read_text("utf-8"))
         if manifest.get("version")!=1 or manifest.get("cipher")!="AES-256-GCM":
             raise SystemExit("Unsupported encrypted bundle format")
+        if manifest.get("kind","ready")!=x.kind:
+            raise SystemExit("Encrypted bundle kind mismatch (stage versus ready)")
+        members=[e["name"] for e in manifest.get("files",[])]
+        if len(members)!=len(selected_files) or sorted(members)!=sorted(selected_files):
+            raise SystemExit("Encrypted bundle members do not match expected file set")
         salt=bytes.fromhex(manifest["kdf_salt"])
     key=hashlib.scrypt(secret.encode("utf-8"),salt=salt,n=32768,r=8,p=1,dklen=32,maxmem=128*1024*1024)
     aes=AESGCM(key)
     dest=x.destination.resolve()
     dest.mkdir(parents=True,exist_ok=True)
     if x.mode=="encrypt":
-        manifest={"version":1,"cipher":"AES-256-GCM","kdf":"scrypt",
+        manifest={"version":1,"kind":x.kind,"cipher":"AES-256-GCM","kdf":"scrypt",
                   "kdf_n":32768,"kdf_r":8,"kdf_p":1,"kdf_salt":salt.hex(),
                   "chunk_size":CHUNK_SIZE,"files":[]}
         seq=0
-        for filename in FILES:
+        for filename in selected_files:
             source=x.source/filename
             if not source.is_file():raise SystemExit("Missing ready image component: "+str(source))
             state=hashlib.sha256()
@@ -71,7 +85,7 @@ def main():
     else:
         for ent in manifest["files"]:
             name=ent["name"]
-            if name not in FILES or Path(name).name!=name:
+            if name not in selected_files or Path(name).name!=name:
                 raise SystemExit("Unsafe encrypted bundle member")
             output=dest/name
             if output.exists():raise SystemExit("Refusing to overwrite "+str(output))
@@ -90,6 +104,8 @@ def main():
                     clear=aes.decrypt(nonce,data,aad)
                     digest.update(clear)
                     out.write(clear)
+                    if x.consume_chunks:
+                        (x.source/part).unlink()
             if tmp.stat().st_size!=ent["size"] or digest.hexdigest()!=ent["sha256"]:
                 tmp.unlink(missing_ok=True)
                 raise SystemExit("Decrypted file size or SHA256 mismatch: "+name)
