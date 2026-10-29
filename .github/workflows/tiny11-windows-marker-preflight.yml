@@ -1,0 +1,52 @@
+name: Tiny11 Windows first-login and second-boot marker validation
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - '.github/workflows/tiny11-windows-marker-preflight.yml'
+      - 'tiny11-qcow2-lab/apply-tiny11-ready.ps1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2022
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Windows boot-probe batch syntax and FAT-disk marker
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source='tiny11-qcow2-lab/apply-tiny11-ready.ps1'
+          $tokens=$null;$issues=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $source).Path,[ref]$tokens,[ref]$issues)|Out-Null
+          if($issues.Count){$issues|Out-Host;throw "PowerShell source parsing failed"}
+          $raw=Get-Content $source -Raw
+          $pattern="(?s)# A startup marker task.*?\@'\r?\n(?<batch>\@echo off.*?)(?:\r?\n)'\@"
+          $match=[regex]::Match($raw,$pattern)
+          if(-not $match.Success){throw "Startup marker script not extracted"}
+          $dir=Join-Path $env:RUNNER_TEMP 'tiny11-marker-test'
+          New-Item -ItemType Directory -Force -Path $dir|Out-Null
+          $batch=Join-Path $dir 'Tiny11BootProbe.cmd'
+          $match.Groups['batch'].Value|Set-Content -LiteralPath $batch -Encoding ASCII
+          $drive='R:'
+          if(Test-Path 'R:\'){throw "R: is already in use"}
+          & subst.exe $drive $dir
+          if($LASTEXITCODE -ne 0){throw "Cannot mount test FAT-simulation drive"}
+          try {
+            Set-Content -LiteralPath 'R:\TINY11_PROBE.TXT' -Value READY_FIRST_BOOT -Encoding ASCII
+            & cmd.exe /d /c "$batch"
+            if($LASTEXITCODE -ne 0){throw "Windows boot marker exited nonzero"}
+            $ready='R:\TINY11_INSTALLED_READY.TXT'
+            if(-not(Test-Path $ready)){throw "Windows boot marker did not write readiness file"}
+            if((Get-Content $ready -Raw) -notmatch 'TINY11_INSTALLED_READY'){
+              throw 'Guest marker content mismatch'
+            }
+            Write-Host "PASS: Windows boot marker detects assigned disk letter and writes ready proof"
+          } finally {
+            & subst.exe $drive /d | Out-Null
+          }
+          if($raw -notmatch 'TINY11_FIRST_LOGON_READY'){throw 'Missing first login proof'}
+          if($raw -notmatch 'shutdown.exe /s /f /t 5'){throw 'No clean guest shutdown command'}
+          Write-Host 'PASS: ready-disk Windows first login and shutdown hook present'
