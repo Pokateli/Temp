@@ -19,15 +19,15 @@ jobs:
           if [ ! -c /dev/kvm ]; then echo "RESULT: KVM unavailable (no /dev/kvm)"; exit 0; fi
           ls -l /dev/kvm
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo "RESULT: KVM device exists but is not accessible"; exit 0
+            echo "KVM device denied to unprivileged runner; attempt QEMU with sudo instead"
           fi
           sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends qemu-system-x86
           set +e
-          timeout 8s qemu-system-x86_64 -machine pc,accel=kvm -cpu host -m 128 -S -nodefaults -display none -monitor none -serial none 2>&1
+          sudo timeout 8s qemu-system-x86_64 -machine pc,accel=kvm -cpu host -m 128 -S -nodefaults -display none -monitor none -serial none 2>&1
           rc=$?
           set -e
           if [ "$rc" -eq 124 ]; then
-            echo "RESULT: KVM accelerator initialized successfully"
+            echo "RESULT: KVM accelerator initialized successfully as root"
           else
             echo "RESULT: KVM QEMU failed/terminated with code $rc"
           fi
