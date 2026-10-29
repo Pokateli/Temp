@@ -1,3 +1,19 @@
+## 2026-10-29 — Root cause of large GitHub artifact transfer and fix
+
+**Confirmed real failure** (not Node warning): [KVM run 40906341119, ubuntu job 123600680280](https://github.com/Pokateli/Temp/actions/runs/40906341119/job/123600680280) first transferred `tiny11-kvm-stage-plain`, one 7,906,067,331 byte artifact. The `actions/download-artifact@v4` output included Node `DEP0005 Buffer()` warning, but later SHA256 stage validation failed: `tiny11-zstd.qcow2: FAILED`, `ready-credentials.txt: No such file or directory`. Therefore the *reassembled/extracted 7.9GB stage was invalid*, regardless of the incidental deprecation warning. No guest Windows KVM OOBE was attempted on that corrupt stage.
+
+**Implemented**: `windows-vm-runtime/ready-parts.py` accepts `--kind stage`, preserving both stage QCOW2 and credentials inside a streamed tar archive split into independently hashed 384MiB `part-NNN.bin` files with `stage-parts.json` manifest; the old `ready` format remains supported. `.github/workflows/tiny11-ready-kvm-public.yml` uses one GitHub artifact **per shard** (32 conditional uploads max) plus an index artifact, downloads with `pattern: tiny11-kvm-stage-part-*` and `merge-multiple: true`, verifies both individual part hashes and restored file hashes, and then checks the original `STAGE-SHA256SUMS`. The previous one-piece `tiny11-kvm-stage-plain` upload and download were removed in that workflow. Note stage-sharding does not make Windows boot/OOBE success automatic; it fixes transfer integrity.
+
+**Validation**:
+- [Stage and ready sharding cross-boundary smoke #40922811605](https://github.com/Pokateli/Temp/actions/runs/40922811605) passed.
+- [Windows uploader → Ubuntu downloader cross-runner test #40922888751](https://github.com/Pokateli/Temp/actions/runs/40922888751) passed. Both jobs completed success; logs show `PASS: Windows uploader to Linux downloader produced byte-identical stage and credentials`. This test uses synthetic data, **not** a real Windows image.
+- New full production build [#40922779780](https://github.com/Pokateli/Temp/actions/runs/40922779780) was triggered by the sharded workflow change and is subject to completing the original Microsoft WIM build first.
+- Earlier jobs, including [#40908895996](https://github.com/Pokateli/Temp/actions/runs/40908895996), retain their *original checkout* and old 7.9GB monolithic download, so do not mistake their ongoing deprecation warning for a test of this fix.
+
+Next decisive step: the new Windows stage job finishes installing WIM to ZSTD QCOW2, splits it into independently uploaded shards, Ubuntu assembles it with SHA256 verification, and only then Linux KVM boots Windows to OOBE, performs clean shutdown and second-boot verification. Never mark the finished ready disk as available before actual guest proof.
+
+---
+
 ## 2026-10-29 latest continuation (active build status, do not claim OS is ready)
 
 New checks and changes:
