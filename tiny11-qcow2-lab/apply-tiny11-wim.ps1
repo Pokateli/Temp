@@ -46,6 +46,40 @@ try {
   & dism.exe /Apply-Image "/ImageFile:$image" /Index:1 /ApplyDir:W:\ /CheckIntegrity |
     Tee-Object -FilePath (Join-Path $report 'apply-image.txt') | Out-Host
   if($LASTEXITCODE -ne 0){throw "DISM Apply-Image failed: $LASTEXITCODE"}
+  # Install Windows answer file into the applied image. Microsoft documents Panther\Unattend
+  # as a supported deployment answer-file location, and specializes on first Windows boot.
+  $answer=Join-Path $env:GITHUB_WORKSPACE 'windows-vm-runtime\audit-unattend.xml'
+  if(-not(Test-Path $answer)){throw "Missing audit-unattend.xml: $answer"}
+  [xml]$xml=Get-Content -LiteralPath $answer -Raw
+  if(-not $xml.unattend){throw "Invalid Windows unattended answer file"}
+  $answerDir='W:\Windows\Panther\Unattend'
+  New-Item -ItemType Directory -Force -Path $answerDir | Out-Null
+  Copy-Item -LiteralPath $answer -Destination (Join-Path $answerDir 'Unattend.xml') -Force
+  $scriptDir='W:\Windows\Setup\Scripts'
+  New-Item -ItemType Directory -Force -Path $scriptDir | Out-Null
+  @'
+@echo off
+setlocal EnableExtensions
+if not exist "%SystemRoot%\Temp" mkdir "%SystemRoot%\Temp"
+echo TINY11_SPECIALIZE_STARTED>"%SystemRoot%\Temp\Tiny11Specialize.log"
+for /L %%N in (1,1,8) do (
+ for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
+   if exist %%D:\TINY11_PROBE.TXT (
+     echo TINY11_SPECIALIZE_READY>%%D:\TINY11_SPECIALIZE.TXT
+     ver >>%%D:\TINY11_SPECIALIZE.TXT
+     echo MACHINE=%COMPUTERNAME%>>%%D:\TINY11_SPECIALIZE.TXT
+     echo TINY11_READY>%%D:\TINY11_READY.TXT
+     ver >>%%D:\TINY11_READY.TXT
+     echo STAGE=SPECIALIZE>>%%D:\TINY11_READY.TXT
+     exit /b 0
+   )
+ )
+ ping -n 3 127.0.0.1 >nul
+)
+echo PROBE_FAT_DEVICE_NOT_FOUND>>"%SystemRoot%\Temp\Tiny11Specialize.log"
+exit /b 0
+'@ | Set-Content -LiteralPath (Join-Path $scriptDir 'Tiny11Probe.cmd') -Encoding ASCII
+  Write-Host 'Installed Windows Audit answer file and specialize guest marker command'
   # SetupComplete is expected to run as SYSTEM when initial Windows setup finalizes.
   # QEMU host provides TINY11_PROBE.TXT on its FAT virtual exchange disk.
   $hooks='W:\Windows\Setup\Scripts'
