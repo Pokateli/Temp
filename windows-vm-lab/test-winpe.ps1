@@ -26,7 +26,7 @@ $serialLog = Join-Path $logs 'qemu-serial.txt'
 $stdout = Join-Path $logs 'qemu-stdout.txt'
 $stderr = Join-Path $logs 'qemu-stderr.txt'
 $argumentList = @(
-  '-machine','pc,accel=tcg,thread=multi',
+  '-machine','pc,accel=tcg',
   '-cpu','max',
   '-smp','2',
   '-m','3072',
