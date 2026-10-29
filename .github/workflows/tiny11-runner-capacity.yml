@@ -1,0 +1,23 @@
+name: Windows Tiny11 runner capacity preflight
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths: ['.github/workflows/tiny11-runner-capacity.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capacity:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - name: Report actual disk and memory capacity for 8.2 GB ISO + WIM + VHDX
+        shell: pwsh
+        run: |
+          Write-Host "RUNNER_TEMP=$env:RUNNER_TEMP"
+          Get-CimInstance Win32_LogicalDisk | Where-Object DriveType -eq 3 |
+            Select-Object DeviceID,FileSystem,@{N='Free_GiB';E={[math]::Round($_.FreeSpace/1GB,2)}},@{N='Capacity_GiB';E={[math]::Round($_.Size/1GB,2)}} |
+            Format-Table -AutoSize
+          Get-CimInstance Win32_OperatingSystem |
+            Select-Object TotalVisibleMemorySize,FreePhysicalMemory | Format-List
+          Write-Host "Reference Windows 11 26H2 Enterprise eval ISO size = 8225329152 bytes"
