@@ -1,0 +1,43 @@
+name: Tiny11 portable QEMU runtime only (no OS image)
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - 'windows-vm-runtime/build-portable-qemu.sh'
+      - '.github/workflows/tiny11-qemu-portable.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable-qemu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build portable Linux x86_64 QEMU from Debian 13
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n windows-vm-runtime/build-portable-qemu.sh
+          OUTPUT_DIR="$PWD/output" bash windows-vm-runtime/build-portable-qemu.sh
+      - name: Verify checksums, runtime, QEMU image compatibility
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd output/tiny11-qemu-runtime-linux-amd64
+          sha256sum -c SHA256SUMS
+          ./lib/ld-linux-x86-64.so.2 --library-path ./lib ./bin/qemu-img --version
+          ./lib/ld-linux-x86-64.so.2 --library-path ./lib ./bin/qemu-system-x86_64 -L ./share/qemu -machine help >/dev/null
+          truncate -s 8M /tmp/synthetic-tiny11.raw
+          ./lib/ld-linux-x86-64.so.2 --library-path ./lib ./bin/qemu-img convert -f raw -O qcow2 -c -o compat=1.1,compression_type=zstd /tmp/synthetic-tiny11.raw /tmp/synthetic-tiny11.qcow2
+          ./lib/ld-linux-x86-64.so.2 --library-path ./lib ./bin/qemu-img info /tmp/synthetic-tiny11.qcow2 | grep -i zstd
+      - name: Upload reusable portable QEMU without any OS disk
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-qemu-runtime-linux-amd64
+          path: |
+            output/tiny11-qemu-runtime-linux-amd64.tar.gz
+            output/tiny11-qemu-runtime-linux-amd64.tar.gz.sha256
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
