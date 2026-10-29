@@ -30,7 +30,7 @@ $stderr=Join-Path $logs 'qemu-tiny11-stderr.log'
 $ser=Join-Path $logs 'qemu-tiny11-serial.log'
 $args=@(
   '-machine','pc,accel=tcg','-cpu','max','-smp','2','-m','2560',
-  '-no-reboot','-display','none','-vga','std',
+  '-display','none','-vga','std',
   '-monitor','tcp:127.0.0.1:4444,server=on,wait=off',
   '-serial',"file:$ser",'-nic','none',
   '-drive',"if=pflash,format=raw,readonly=on,file=$code",
