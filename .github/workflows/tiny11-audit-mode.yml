@@ -1,4 +1,4 @@
-name: Tiny11 Audit Mode TCG boot + ZSTD QCOW2
+name: Tiny11 Audit Mode TCG boot + ZSTD QCOW2 (fixed PowerShell)
 on:
   push:
     branches: [windows-tiny11-audit-20261029]
