@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -90,9 +91,12 @@ def main():
         return
     if opt.ram<1024 or opt.ram>8192:raise SystemExit("Guest RAM must be 1024..8192 MiB")
     root.mkdir(parents=True,exist_ok=True)
-    overlay=root/"tiny11-session.qcow2"
-    session_vars=root/"OVMF_VARS-session.fd"
-    if opt.reset_session:
+    # Automated probes are disposable: never let a failed or forcibly stopped
+    # second boot damage the persistent interactive session or the clean base.
+    is_probe=opt.action=="probe"
+    overlay=root/("tiny11-probe.qcow2" if is_probe else "tiny11-session.qcow2")
+    session_vars=root/("OVMF_VARS-probe.fd" if is_probe else "OVMF_VARS-session.fd")
+    if is_probe or opt.reset_session:
         overlay.unlink(missing_ok=True)
         session_vars.unlink(missing_ok=True)
     if not overlay.is_file():
@@ -112,6 +116,9 @@ def main():
         shutdown_request.unlink(missing_ok=True)
     monitor=root/"qemu-monitor.sock"
     if monitor.exists():monitor.unlink()
+    serial_path=root/"qemu-serial.log"
+    # Stale COM1 logs must NEVER be allowed to confirm a later boot.
+    if opt.action=="probe":serial_path.unlink(missing_ok=True)
     cmd=qemu_command("qemu-system-x86_64",opt.qemu_home)
     if opt.qemu_home:
         candidate=Path(opt.qemu_home)/"share"/"qemu"
@@ -129,7 +136,7 @@ def main():
     if os.name=="nt":
         cmd+=["-monitor","tcp:127.0.0.1:4444,server=on,wait=off"]
     else:cmd+=["-monitor","unix:"+str(monitor)+",server=on,wait=off"]
-    cmd+=["-serial","file:"+str(root/"qemu-serial.log")]
+    cmd+=["-serial","file:"+str(serial_path)]
     print("Starting installed Windows via QEMU "+opt.accelerator.upper()+". No reinstall. Network disabled.",flush=True)
     print("VNC is loopback-only on port 5900 (unless --headless).",flush=True)
     if opt.action=="start":
@@ -141,31 +148,64 @@ def main():
         proc=subprocess.Popen(cmd,stdout=out,stderr=subprocess.STDOUT)
         deadline=time.monotonic()+opt.seconds
         timed_out=False
+        host_terminated=False
+        guest_marker_at=None
+        acpi_requested=False
+        acpi_grace_seconds=90
+        def proof_status():
+            fat=ready.read_text(errors="replace") if ready.is_file() else ""
+            serial=serial_path.read_text(errors="replace") if serial_path.is_file() else ""
+            return ("TINY11_INSTALLED_READY" in fat and "COMPUTER=" in fat,
+                    "TINY11_INSTALLED_READY SECOND_BOOT_CONFIRMED" in serial)
         try:
             while proc.poll() is None:
-                if time.monotonic()>=deadline:
+                now=time.monotonic()
+                fat_live,serial_live=proof_status()
+                if (fat_live or serial_live) and guest_marker_at is None:
+                    guest_marker_at=now
+                    print("Second installed-Windows boot confirmed. Requesting graceful ACPI shutdown.",flush=True)
+                if guest_marker_at is not None and not acpi_requested and os.name!="nt":
+                    if monitor.is_socket():
+                        try:
+                            with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as monitor_sock:
+                                monitor_sock.settimeout(3)
+                                monitor_sock.connect(str(monitor))
+                                monitor_sock.recv(4096)
+                                monitor_sock.sendall(b"system_powerdown\n")
+                            acpi_requested=True
+                        except OSError as e:
+                            print("ACPI poweroff request unavailable:",e,flush=True)
+                if guest_marker_at is not None and now-guest_marker_at>=acpi_grace_seconds:
+                    print("Windows boot proof present but guest did not power off: discarding probe overlay.",flush=True)
+                    break
+                if now>=deadline:
                     timed_out=True
                     break
                 time.sleep(5)
         finally:
             if proc.poll() is None:
+                host_terminated=True
                 proc.terminate()
                 try:proc.wait(timeout=8)
                 except subprocess.TimeoutExpired:proc.kill();proc.wait()
-        # QEMU's vvfat backend can delay making Windows guest writes visible to
-        # the host until QEMU exits. Do NOT decide success before final flush.
-        proof=ready.read_text(errors="replace") if ready.is_file() else ""
-        serial_path=root/"qemu-serial.log"
-        serial_proof=serial_path.read_text(errors="replace") if serial_path.is_file() else ""
-        fat_confirmed=("TINY11_INSTALLED_READY" in proof and "COMPUTER=" in proof)
-        serial_confirmed="TINY11_INSTALLED_READY SECOND_BOOT_CONFIRMED" in serial_proof
-        success=(not timed_out and proc.returncode==0 and
-                 (fat_confirmed or serial_confirmed))
+        # vvfat can publish guest writes only when QEMU exits; reread both
+        # sources after all emulated block devices have been closed.
+        fat_confirmed,serial_confirmed=proof_status()
+        success=fat_confirmed or serial_confirmed
+        clean_shutdown=(not host_terminated and not timed_out and proc.returncode==0)
+        # The first OOBE disk was already captured after a verified CLEAN
+        # shutdown. A second boot is read-only against that base; the probe
+        # overlay is disposable and never distributed, even on forced exit.
+        if is_probe:
+            overlay.unlink(missing_ok=True)
+            session_vars.unlink(missing_ok=True)
         if success:
-            print("PASS: already-installed Windows wrote startup proof and powered off cleanly",flush=True)
+            print("PASS: second boot confirmed by guest FAT/COM1. Guest clean shutdown:",clean_shutdown,flush=True)
         result={"boot_confirmed":success,"runtime":"qemu-"+opt.accelerator,"probe_seconds":opt.seconds,
-                "guest_shutdown_clean":proc.returncode==0 and not timed_out,
+                "guest_shutdown_clean":clean_shutdown,
                 "qemu_exit_code":proc.returncode,"probe_timed_out":timed_out,
+                "host_terminated":host_terminated,"probe_overlay_discarded":is_probe,
+                "acpi_shutdown_requested":acpi_requested,
                 "fat_marker_confirmed":fat_confirmed,"serial_marker_confirmed":serial_confirmed,
                 "guest_ready_file":str(ready),"log":str(log),"image_sha256":meta["disk_sha256"]}
         (root/"probe-result.json").write_text(json.dumps(result,indent=2)+"\n")
