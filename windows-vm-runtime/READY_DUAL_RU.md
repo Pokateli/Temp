@@ -9,11 +9,11 @@
 каждая сессия использует отдельный qcow2 overlay.
 
 Этот проект находится **только в Pokateli/Temp**, ветка
-\`windows-tiny11-dual-ready-20261029\`. Основная ветка Temp не затрагивается.
+`windows-tiny11-dual-ready-20261029`. Основная ветка Temp не затрагивается.
 
 ### Проверяемая структура готового комплекта
 
-\`\`\`text
+```text
 tiny11-ready/
   tiny11-ready-zstd.qcow2       # УЖЕ установленная и настроенная Windows
   tiny11-ready-manifest.json    # SHA-256, виртуальный размер, состояние OOBE
@@ -22,7 +22,7 @@ tiny11-ready/
   SHA256SUMS
   ready-credentials.txt         # Секретный пароль локальной учётной записи vmuser
   tiny11-session.qcow2          # создаётся при первом запуске, не входит в базовый пакет
-\`\`\`
+```
 
 Размер готового диска пока не подтверждён: более ранний **установленный, но
 ещё не завершивший OOBE** образ занимал около 7,9 ГБ со сжатием ZSTD.
@@ -49,17 +49,17 @@ workflow должен завершиться с ошибкой и не выда�
 
 ### Передача готового диска из публичного Temp
 
-Поскольку \`Temp\` публичный и диск содержит лицензируемую Windows и учётные
+Поскольку `Temp` публичный и диск содержит лицензируемую Windows и учётные
 данные, **незашифрованный Windows-образ никогда не загружается в GitHub Artifact**.
 
 Для включения доставки пользователь должен создать секрет GitHub Actions:
 
 **Repository → Settings → Secrets and variables → Actions → New repository secret**.
 
-Имя: \`TINY11_ARCHIVE_PASSPHRASE\`. Значение: длинная приватная фраза **от 16 символов**.
+Имя: `TINY11_ARCHIVE_PASSPHRASE`. Значение: длинная приватная фраза **от 16 символов**.
 Не записывайте её в GitHub исходники или в чат. Храните свой экземпляр безопасно.
 
-Если секрет установлен, workflow создаст artifact \`tiny11-ready-encrypted-v1\`:
+Если секрет установлен, workflow создаст artifact `tiny11-ready-encrypted-v1`:
 AES-256-GCM, scrypt, аутентифицированные блоки 128 МиБ, SHA-256 каждого
 зашифрованного блока. В пакет включается **готовый QCOW2, UEFI, манифест и
 учётные данные** — всё только в зашифрованном виде.
@@ -74,7 +74,7 @@ AES-256-GCM, scrypt, аутентифицированные блоки 128 Ми�
 [Workflow «Run preinstalled Tiny11 QCOW2»](../../actions/workflows/tiny11-ready-run.yml).
 
 Укажите **source_run_id** успешной сборки, имеющей artifact
-\`tiny11-ready-encrypted-v1\`. Workflow загружает зашифрованные части,
+`tiny11-ready-encrypted-v1`. Workflow загружает зашифрованные части,
 расшифровывает с помощью секрета GitHub Actions, проверяет манифест и запускает
 **готовый Windows-диск** через QEMU TCG. Образ не устанавливается заново.
 
@@ -83,32 +83,32 @@ AES-256-GCM, scrypt, аутентифицированные блоки 128 Ми�
 ## Вариант 3: запуск в песочнице ChatGPT
 
 После того как через GitHub Connector или пользовательскую передачу зашифрованный
-artifact будет помещён в папку \`/mnt/data/tiny11-ready-encrypted\`, а пароль
-станет доступен в переменной окружения \`TINY11_ARCHIVE_PASSPHRASE\`,
+artifact будет помещён в папку `/mnt/data/tiny11-ready-encrypted`, а пароль
+станет доступен в переменной окружения `TINY11_ARCHIVE_PASSPHRASE`,
 и QEMU установлен из нашего Debian 13 portable kit:
 
-\`\`\`bash
+```bash
 export QEMU_HOME=/mnt/data/debian13-chatgpt-vm
 export ENCRYPTED_DIR=/mnt/data/tiny11-ready-encrypted
 export READY_DIR=/mnt/data/tiny11-ready
 
 bash windows-vm-runtime/bootstrap-chatgpt.sh verify
 bash windows-vm-runtime/bootstrap-chatgpt.sh start
-\`\`\`
+```
 
 Для проверки загрузки без VNC:
 
-\`\`\`bash
+```bash
 bash windows-vm-runtime/bootstrap-chatgpt.sh probe
-\`\`\`
+```
 
 Для новой чистой сессии без изменений предыдущей:
 
-\`\`\`bash
+```bash
 bash windows-vm-runtime/bootstrap-chatgpt.sh reset-session
-\`\`\`
+```
 
-Экран: локальный VNC \`127.0.0.1:5900\`, не внешний IP. Сеть гостя отключена.
+Экран: локальный VNC `127.0.0.1:5900`, не внешний IP. Сеть гостя отключена.
 Гость по умолчанию получает 2 vCPU, 2560 МиБ RAM, QEMU TCG, OVMF.
 Локальный лимит контейнера ChatGPT ~4 ГБ: **фактическую пригодность полностью
 загруженной Tiny11 необходимо проверить отдельно**. Нет KVM; скорость Windows
@@ -119,7 +119,7 @@ bash windows-vm-runtime/bootstrap-chatgpt.sh reset-session
 - Не используйте этот образ как обычный интернет-десктоп: он создан для
   изолированной проверки программ, сеть гостя отключена.
 - Шифрование защищает artifact на публичном GitHub. Не публикуйте пароль или
-  \`ready-credentials.txt\` в открытом виде.
+  `ready-credentials.txt` в открытом виде.
 - Оценочная Windows регулируется условиями Microsoft, а Tiny11 — сторонняя
   модификация. Возможность загрузки в VM не снимает лицензионных ограничений.
 - Сборка в GitHub и запуск на Windows Runner **не доказывают** возможность
@@ -131,7 +131,7 @@ bash windows-vm-runtime/bootstrap-chatgpt.sh reset-session
 проверены QEMU TCG на Linux, раздельный overlay, отрицательный тест
 готовности искусственного диска, AES-256-GCM encrypted transfer и совпадение SHA-256.
 
-Успех первого выпуска настоящего \`tiny11-ready-zstd.qcow2\` определяется
-отдельно по результатам workflow \`tiny11-ready-build.yml\`, наличию
-\`windows-first-logon-proof.txt\` и \`probe-result.json\` с
-\`boot_confirmed: true\`.
+Успех первого выпуска настоящего `tiny11-ready-zstd.qcow2` определяется
+отдельно по результатам workflow `tiny11-ready-build.yml`, наличию
+`windows-first-logon-proof.txt` и `probe-result.json` с
+`boot_confirmed: true`.
