@@ -1,0 +1,65 @@
+name: Tiny11 VM acceleration capability probe (no Windows disk)
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths: ['.github/workflows/tiny11-acceleration-probe.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ubuntu-kvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Check KVM availability and QEMU accelerator
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "KVM /dev/kvm probe"
+          if [ ! -c /dev/kvm ]; then echo "RESULT: KVM unavailable (no /dev/kvm)"; exit 0; fi
+          ls -l /dev/kvm
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "RESULT: KVM device exists but is not accessible"; exit 0
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends qemu-system-x86
+          set +e
+          timeout 8s qemu-system-x86_64 -machine pc,accel=kvm -cpu host -m 128 -S -nodefaults -display none -monitor none -serial none 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ]; then
+            echo "RESULT: KVM accelerator initialized successfully"
+          else
+            echo "RESULT: KVM QEMU failed/terminated with code $rc"
+          fi
+  windows-whpx:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Check WHPX without creating or changing Windows features
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe='C:\Program Files\qemu\qemu-system-x86_64.exe'
+          if(-not(Test-Path $exe)){
+            choco install qemu --version=2026.8.11 --yes --no-progress --limit-output
+            if($LASTEXITCODE -ne 0){throw 'QEMU installation failed'}
+          }
+          Write-Host 'Check WHPX availability without modifying Windows features or requiring a guest disk'
+          $errFile=Join-Path $env:RUNNER_TEMP 'whpx-probe-stderr.txt'
+          $outFile=Join-Path $env:RUNNER_TEMP 'whpx-probe-stdout.txt'
+          $cmd=@('-machine','pc,accel=whpx','-cpu','max','-smp','2','-m','256','-S','-nodefaults','-display','none','-monitor','none','-serial','none')
+          $proc=Start-Process -FilePath $exe -ArgumentList $cmd -PassThru -RedirectStandardError $errFile -RedirectStandardOutput $outFile
+          try{
+            Start-Sleep -Seconds 9
+            $proc.Refresh()
+            if(-not $proc.HasExited){
+              Write-Host 'RESULT: WHPX initialized and QEMU process stayed alive'
+            }else{
+              Write-Host "RESULT: WHPX unavailable or failed, QEMU exit $($proc.ExitCode)"
+            }
+          } finally{
+            $proc.Refresh()
+            if(-not $proc.HasExited){Stop-Process -Id $proc.Id -Force}
+          }
+          if(Test-Path $errFile){Get-Content $errFile -Tail 25 | Out-Host}
+          Write-Host 'WHPX diagnostic probe complete; no system features or Windows guest image were modified'
