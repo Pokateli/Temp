@@ -1,0 +1,29 @@
+name: AWG Manager test peer WireGuard packages (Debian 13)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-wireguard-peers.yml
+permissions:
+  contents: read
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download WireGuard tools with offline Debian 13 dependencies
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$PWD/wg-debs"
+          docker run --rm -v "$PWD/wg-debs:/out" debian:13-slim bash -euc '
+            apt-get update
+            apt-get -y --download-only install wireguard-tools iproute2 iputils-ping
+            cp -v /var/cache/apt/archives/*.deb /out/
+            (cd /out && sha256sum *.deb > SHA256SUMS)
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-test-wireguard-tools-debian13-amd64
+          path: wg-debs/
+          compression-level: 0
+          retention-days: 30
