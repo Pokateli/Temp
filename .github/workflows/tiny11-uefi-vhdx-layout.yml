@@ -1,0 +1,48 @@
+name: Tiny11 native UEFI VHDX layout preflight
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths: ['.github/workflows/tiny11-uefi-vhdx-layout.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Build exact Tiny11 GPT EFI+MSR+NTFS partition layout with native DiskPart
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'uefi-gpt-probe'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $image=Join-Path $dir 'tiny11.vhdx'
+          if((Test-Path Y:\) -or (Test-Path W:\)){throw 'Requested test drive letters in use'}
+          $dps=Join-Path $dir 'layout.dps'
+          @(
+            ('CREATE VDISK FILE="{0}" MAXIMUM=65536 TYPE=EXPANDABLE' -f $image),
+            ('SELECT VDISK FILE="{0}"' -f $image),
+            'ATTACH VDISK',
+            'CONVERT GPT',
+            'CREATE PARTITION EFI SIZE=260',
+            'FORMAT QUICK FS=FAT32 LABEL="EFI"',
+            'ASSIGN LETTER=Y',
+            'CREATE PARTITION MSR SIZE=16',
+            'CREATE PARTITION PRIMARY',
+            'FORMAT QUICK FS=NTFS LABEL="Windows"',
+            'ASSIGN LETTER=W',
+            'EXIT'
+          ) | Set-Content -Path $dps -Encoding ASCII
+          Get-Content $dps | Out-Host
+          & diskpart.exe /s $dps | Out-Host
+          if(-not(Test-Path Y:\) -or -not(Test-Path W:\)){throw 'EFI/Windows partitions not ready'}
+          $efi=(Get-Volume -DriveLetter Y).FileSystem
+          $win=(Get-Volume -DriveLetter W).FileSystem
+          if($efi -ne 'FAT32' -or $win -ne 'NTFS'){throw "Wrong filesystems EFI=$efi Windows=$win"}
+          Set-Content W:\BOOTCHECK.TXT -Value GPT_UEFI_OK -Encoding ASCII
+          $detach=Join-Path $dir 'detach.dps'
+          @( ('SELECT VDISK FILE="{0}"' -f $image), 'DETACH VDISK', 'EXIT') |
+            Set-Content -Path $detach -Encoding ASCII
+          & diskpart.exe /s $detach | Out-Host
+          Write-Host "PASS: 64-GiB dynamic VHDX, EFI 260MiB FAT32, MSR 16MiB, Windows NTFS"
