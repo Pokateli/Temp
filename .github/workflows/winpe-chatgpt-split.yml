@@ -1,0 +1,64 @@
+name: Split encrypted WinPE preview for ChatGPT Connector size limit
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths: ['.github/workflows/winpe-chatgpt-split.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  split:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Re-download previously successful encrypted WinPE artifact (no OS rebuild)
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/winpe-original"
+          gh run download 40892518582 --repo Pokateli/Temp --name winpe-chatgpt-rsa-encrypted --dir "$RUNNER_TEMP/winpe-original"
+          ls -lah "$RUNNER_TEMP/winpe-original" | tail
+      - name: Partition encrypted chunks into 3 independent portable artifacts
+        run: |
+          python3 - <<'PY'
+          import os,shutil,json
+          from pathlib import Path
+          source=Path(os.environ['RUNNER_TEMP'])/'winpe-original'
+          out=Path(os.environ['GITHUB_WORKSPACE'])/'winpe-shards'
+          for i in range(3):(out/str(i)).mkdir(parents=True,exist_ok=True)
+          chunks=sorted(source.glob('chunk-*.bin'))
+          assert chunks, 'No authenticated encrypted OS parts downloaded'
+          assert (source/'manifest.json').exists(),'No RSA envelope metadata'
+          shutil.copy2(source/'manifest.json',out/'0'/'manifest.json')
+          total=[0,0,0]
+          for i,f in enumerate(chunks):
+              part=i%3
+              shutil.copy2(f,out/str(part)/f.name)
+              total[part]+=f.stat().st_size
+          print('Chunks:',len(chunks),'shard sizes:',total,flush=True)
+          assert max(total)<450*1024*1024,'Individual artifact exceeds connector limit'
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winpe-rsa-shard-0
+          path: winpe-shards/0/
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winpe-rsa-shard-1
+          path: winpe-shards/1/
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winpe-rsa-shard-2
+          path: winpe-shards/2/
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
