@@ -1,3 +1,18 @@
+## 2026-10-29 latest continuation (active build status, do not claim OS is ready)
+
+New checks and changes:
+- [KVM full-hardware synthetic smoke #40908732098](https://github.com/Pokateli/Temp/actions/runs/40908732098) succeeded with unprivileged QEMU+KVM, 4M OVMF pflash, ZSTD QCOW2, writable virtual FAT, and a 921615-byte VGA screendump. HMP showed `kvm support: enabled`.
+- COM1 PowerShell guest construction fixed to `[System.IO.Ports.SerialPort]::new(...)` and checked on real Windows runner. [marker preflight #40908496961](https://github.com/Pokateli/Temp/actions/runs/40908496961) passed.
+- Pinned upstream Tiny11 maker optimized: copy **only** `sources/install.wim` instead of the entire ISO, then stop immediately after exported install.wim, before installer `boot.wim` editing or installer ISO creation. [Preflight #40909164315](https://github.com/Pokateli/Temp/actions/runs/40909164315) passed. This optimization applies to **future new builds**; currently running builds use their original checkout commit.
+- The upstream installer-oriented `Windows/System32/Sysprep/autounattend.xml` is removed from the DISM-applied image to avoid competing with our authoritative `Windows/Panther/Unattend/Unattend.xml`, which creates `vmuser` and controls first OOBE. [marker preflight #40909403622](https://github.com/Pokateli/Temp/actions/runs/40909403622) passed.
+- New KVM ready-disk workflow uploads diagnostic `firstboot-*.ppm` screenshots if the guest boot fails or succeeds. Changes to workflows caused separate fresh runs; do not conflate run SHAs.
+- Active KVM ready-disk build [#40906341119](https://github.com/Pokateli/Temp/actions/runs/40906341119) and later [#40908895996](https://github.com/Pokateli/Temp/actions/runs/40908895996): **still on Windows WIM customization when last checked**. Neither ready-image KVM first OOBE nor second installed Windows boot has yet been confirmed.
+- The public Temp authorization for plaintext development artifacts remains in effect only as stated by the user, with Microsoft licensing restrictions still applicable.
+
+Next decisive gate: `ubuntu-kvm` job begins only after `windows-stage` uploads a SHA256-checked `tiny11-kvm-stage-plain` artifact. Look for `firstboot-serial.log`, `firstboot-*.ppm`, guest clean shutdown and then `probe-result.json` with `"boot_confirmed": true`. Do not call a synthetic test a real Windows boot.
+
+---
+
 # Update — accelerated public Tiny11 development pipeline (2026-10-29)
 
 The user explicitly authorized **unencrypted Windows development disk artifacts**
