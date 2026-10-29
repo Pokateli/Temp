@@ -1,4 +1,4 @@
-name: Tiny11 WIM-only to ZSTD QCOW2 and TCG boot
+name: Tiny11 WIM-only ZSTD QCOW2 (fixed VHDX detach)
 on:
   push:
     branches: [windows-tiny11-zstd-debug-20261029]
@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-tiny11:
     runs-on: windows-2022
-    timeout-minutes: 145
+    timeout-minutes: 195
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -37,15 +37,15 @@ jobs:
         run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Download
       - name: Create Tiny11 serviced WIM (skip redundant ISO construction)
         shell: pwsh
-        timeout-minutes: 58
+        timeout-minutes: 79
         run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Build
       - name: Apply modified WIM directly and compress native VHDX into ZSTD QCOW2
         shell: pwsh
-        timeout-minutes: 40
+        timeout-minutes: 60
         run: ./tiny11-qcow2-lab/apply-tiny11-wim.ps1
       - name: Boot actual Tiny11 in QEMU TCG, require in-guest proof
         shell: pwsh
-        timeout-minutes: 22
+        timeout-minutes: 32
         run: ./tiny11-qcow2-lab/test-tiny11-boot.ps1
       - name: Upload diagnostics only (never Windows OS image)
         uses: actions/upload-artifact@v4
