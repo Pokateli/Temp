@@ -145,6 +145,7 @@ jobs:
           path: |
             ${{ runner.temp }}/tiny11-kvm-stage/firstboot-qemu.log
             ${{ runner.temp }}/tiny11-kvm-stage/firstboot-serial.log
+            ${{ runner.temp }}/tiny11-kvm-stage/firstboot-*.ppm
             ${{ runner.temp }}/tiny11-kvm-stage/qemu-serial.log
             ${{ runner.temp }}/tiny11-kvm-stage/qemu-probe.log
             ${{ runner.temp }}/tiny11-kvm-stage/probe-result.json
