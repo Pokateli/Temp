@@ -25,8 +25,8 @@ try {
   if(-not(Test-Path $image)){throw 'Tiny11 ISO missing install.wim'}
   Get-WindowsImage -ImagePath $image | Format-Table | Out-String | Set-Content (Join-Path $report 'tiny11-wim-info.txt')
   $commands=@(
-    ('create vdisk file="'+$vhdx+'" maximum=65536 type=expandable'),
-    ('select vdisk file="'+$vhdx+'"'),
+    ('CREATE VDISK FILE="{0}" MAXIMUM=65536 TYPE=EXPANDABLE' -f $vhdx),
+    ('SELECT VDISK FILE="{0}"' -f $vhdx),
     'attach vdisk',
     'convert gpt',
     'create partition efi size=260',
@@ -40,6 +40,7 @@ try {
   )
   $cmdFile=Join-Path $root 'create-vhdx.dps'
   $commands | Set-Content $cmdFile -Encoding ASCII
+  Write-Host 'DiskPart input:'; Get-Content $cmdFile | Out-Host
   & diskpart.exe /s $cmdFile | Tee-Object -FilePath (Join-Path $report 'diskpart-create.txt') | Out-Host
   if($LASTEXITCODE -ne 0){throw "Diskpart failed: $LASTEXITCODE"}
   $attached=$true
@@ -57,7 +58,7 @@ try {
 } finally {
   if($attached){
     $detach=Join-Path $root 'detach-vhdx.dps'
-    @('select vdisk file="'+$vhdx+'"','detach vdisk','exit') |
+    @( ('SELECT VDISK FILE="{0}"' -f $vhdx), 'DETACH VDISK', 'EXIT' ) |
       Set-Content $detach -Encoding ASCII
     & diskpart.exe /s $detach | Out-Host
   }
