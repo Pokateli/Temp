@@ -115,6 +115,12 @@ for /L %%N in (1,1,40) do (
    ver >>%%D:\TINY11_INSTALLED_READY.TXT
    echo COMPUTER=%COMPUTERNAME%>>%%D:\TINY11_INSTALLED_READY.TXT
    dir %%D:\ >nul 2>&1
+   rem Only automated second-boot probes request clean guest shutdown.
+   rem Normal interactive Windows boots NEVER create this sentinel.
+   if exist %%D:\TINY11_AUTOTEST_SHUTDOWN.TXT (
+    findstr /x /c:"AUTOTEST_SHUTDOWN_V1" %%D:\TINY11_AUTOTEST_SHUTDOWN.TXT >nul 2>&1
+    if not errorlevel 1 shutdown.exe /s /f /t 5 /c "Tiny11 automated second boot verified"
+   )
    exit /b 0
   )
  )
