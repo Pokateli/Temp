@@ -108,14 +108,18 @@ try {
 setlocal EnableExtensions
 if not exist "%SystemRoot%\Temp" mkdir "%SystemRoot%\Temp"
 echo TINY11_SECOND_BOOT_STARTED>"%SystemRoot%\Temp\Tiny11BootProbe.log"
-for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
- if exist %%D:\TINY11_PROBE.TXT (
+for /L %%N in (1,1,40) do (
+ for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
+  if exist %%D:\TINY11_PROBE.TXT (
    echo TINY11_INSTALLED_READY>%%D:\TINY11_INSTALLED_READY.TXT
    ver >>%%D:\TINY11_INSTALLED_READY.TXT
    echo COMPUTER=%COMPUTERNAME%>>%%D:\TINY11_INSTALLED_READY.TXT
    exit /b 0
+  )
  )
+ ping -n 6 127.0.0.1 >nul
 )
+echo SHARED_FAT_DISK_NOT_FOUND>>"%SystemRoot%\Temp\Tiny11BootProbe.log"
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $scriptDir 'Tiny11BootProbe.cmd') -Encoding ASCII
   @'
