@@ -51,6 +51,7 @@ try {
         if(-not $body.Contains($needle)){throw "Unexpected upstream script version; missing: $needle"}
     }
     $body=$body.Replace('Read-Host "Please enter the image index"','1')
+    $body=$body.Replace('Read-Host "Please enter the drive letter for the Windows 11 image"','$ISO')
     $body=$body.Replace('Read-Host "Press Enter to continue"','"noninteractive"')
     # Replace an infinite retry loop with a deterministic one-time check.
     $body=$body.Replace('while ($ImagesIndex -notcontains $index)', 'if ($ImagesIndex -notcontains $index)')
