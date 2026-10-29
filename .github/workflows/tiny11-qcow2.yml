@@ -1,0 +1,51 @@
+name: Tiny11 + real ZSTD QCOW2 VM experiment
+on:
+  push:
+    branches: [windows-tiny11-zstd-20261029]
+    paths:
+      - 'tiny11-qcow2-lab/**'
+      - '.github/workflows/tiny11-qcow2.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qcow2-zstd-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove ZSTD compression, compressed clusters and byte-for-byte contents
+        run: bash tiny11-qcow2-lab/qcow2-zstd-test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tiny11-qcow2-zstd-smoke
+          path: tiny11-qcow2-logs/
+          retention-days: 14
+  tiny11-build:
+    runs-on: windows-2022
+    timeout-minutes: 125
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner disk, RAM, CPU inspection
+        shell: pwsh
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Format-Table
+          Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | Format-List
+          Get-CimInstance Win32_Processor | Select-Object NumberOfLogicalProcessors | Format-List
+      - name: Create Tiny11 from authentic official Microsoft ISO
+        shell: pwsh
+        timeout-minutes: 75
+        run: ./tiny11-qcow2-lab/prepare-tiny11.ps1
+      - name: Offline install Tiny11 and compress QCOW2 with ZSTD
+        shell: pwsh
+        timeout-minutes: 45
+        run: ./tiny11-qcow2-lab/apply-tiny11.ps1
+      - name: Upload diagnostic logs only (NOT Windows images or QCOW2)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tiny11-qcow2-build-diagnostics
+          path: tiny11-qcow2-logs/
+          retention-days: 14
+          if-no-files-found: warn
