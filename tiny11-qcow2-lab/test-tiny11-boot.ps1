@@ -23,8 +23,11 @@ $code=Join-Path $fw 'OVMF_CODE.fd'
 $share=Join-Path $root 'sharefiles'
 New-Item -ItemType Directory -Force -Path $share | Out-Null
 Set-Content -Path (Join-Path $share 'TINY11_PROBE.TXT') -Value INITIAL_WINDOWS_BOOT_TEST -Encoding ASCII
-$marker=Join-Path $share 'TINY11_READY.TXT'
+$marker=Join-Path $share 'TINY11_AUDIT_READY.TXT'
 Remove-Item $marker -Force -ErrorAction SilentlyContinue
+$early=Join-Path $share 'TINY11_SPECIALIZE.TXT'
+Remove-Item $early -Force -ErrorAction SilentlyContinue
+$reportedSpecialize=$false
 $stdout=Join-Path $logs 'qemu-tiny11-stdout.log'
 $stderr=Join-Path $logs 'qemu-tiny11-stderr.log'
 $ser=Join-Path $logs 'qemu-tiny11-serial.log'
@@ -58,20 +61,28 @@ $confirmed=$false
 $started=Get-Date
 $shots=@{}
 try {
-  while(((Get-Date)-$started).TotalSeconds -lt 1500){
+  while(((Get-Date)-$started).TotalSeconds -lt 1950){
     Start-Sleep -Seconds 10
     $sec=[int]((Get-Date)-$started).TotalSeconds
-    foreach($point in @(60,180,420,840,1320)){
+    foreach($point in @(60,180,420,840,1320,1800)){
       if($sec -ge $point -and -not $shots.ContainsKey($point)){
         $shots[$point]=$true
         Save-Screen $point
       }
     }
+    if((-not $reportedSpecialize) -and (Test-Path $early)){
+      $msg=Get-Content $early -Raw
+      if($msg.Contains('TINY11_SPECIALIZE_READY')){
+        $reportedSpecialize=$true
+        Write-Host "TINY11_SPECIALIZE_PROOF: $msg"
+        $msg | Set-Content (Join-Path $logs 'tiny11-specialize-proof.txt')
+      }
+    }
     if(Test-Path $marker){
       $msg=Get-Content $marker -Raw
-      if($msg.Contains('TINY11_READY')){
+      if($msg.Contains('TINY11_AUDIT_READY')){
         $confirmed=$true
-        Write-Host "TINY11_GUEST_READY: $msg"
+        Write-Host "TINY11_AUDIT_DESKTOP_READY: $msg"
         $msg | Set-Content -Path (Join-Path $logs 'tiny11-boot-proof.txt')
         break
       }
@@ -90,7 +101,7 @@ try {
 }
 if(Test-Path $stderr){Get-Content $stderr -Tail 50|Out-Host}
 if(-not $confirmed){
-  Write-Host 'No TINY11_READY marker: screenshot alone is NOT proof Windows booted.'
+  Write-Host 'No TINY11_AUDIT_READY marker: inspect early specialize proof and VGA screenshots; don't claim Audit desktop ready.'
   throw 'Windows guest boot was not verified'
 }
-Write-Host 'PASS: Tiny11 ran SetupComplete inside QEMU TCG without KVM'
+Write-Host 'PASS: Tiny11 reached Windows AuditUser auto-login under QEMU TCG without KVM'
