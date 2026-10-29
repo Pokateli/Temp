@@ -1,3 +1,18 @@
+## 2026-10-30 — VERIFIED READY TINY11 IMAGE PUBLISHED
+
+**SUCCESS** [GitHub Actions run 40928819947](https://github.com/Pokateli/Temp/actions/runs/40928819947) completed with conclusion `success`. This is the first publicly uploaded preinstalled Tiny11 VM kit ready for ChatGPT/VM-Fabric (not a mere synthetic test). Source was a verified DISM-applied Windows evaluation install-stage image from run 40908895996.
+
+The following *actual published* artifacts were downloaded and inspected:
+- `tiny11-ready-public-index` (artifact 12923083196): contains `ready-parts.json`, 20 shards `part-000.bin` through `part-019.bin`, each 384MiB except final smaller shard, all with SHA256.
+- `tiny11-kvm-guest-proof` (artifact 12924120589): `probe-result.json` reports `boot_confirmed=true`, `runtime=qemu-kvm`, `fat_marker_confirmed=true`, `serial_marker_confirmed=true`, `probe_overlay_discarded=true`, `acpi_shutdown_requested=true`; `guest_shutdown_clean=false` and `host_terminated=true` on **second probe only**.
+- Reusable base disk `tiny11-ready-zstd.qcow2`: **8,021,803,008 bytes** (64GiB virtual), SHA256 `9d6b897b3ba5326b6de380b8ef48898c5c9f561b65e4b44507eb713e4300d402`. All six expected files are included, plus `OVMF_CODE.fd`, `OVMF_VARS.fd`, manifest, checksum list, and guest credentials.
+- The **first** KVM Windows OOBE/first login ended with the guest shutting down normally, after which `qemu-img convert -c ... zstd` flattened and produced the immutable ready disk. The **second** KVM boot proved live Windows through COM1 and FAT; ACPI shutdown did not complete; the disposable test overlay was discarded. This is correctly not reported as `guest_shutdown_clean`.
+- Full ready artifacts reside at the run's Artifacts panel, named `tiny11-ready-public-shard-000` to `-019` and `tiny11-ready-public-index`. They have finite retention and must be archived in an authorized destination before expiration.
+- `windows-vm-runtime/ready-parts.py unpack /path/to/parts /mnt/data/tiny11-ready --kind ready` verifies SHA256 on every shard and reconstructed member. `windows-vm-runtime/bootstrap-chatgpt.sh verify` tests the restored disk with portable QEMU; `start` boots under QEMU TCG in ChatGPT without KVM. The entire 8GB ready image has NOT yet been downloaded into this current chat runtime; only the small index and proof were independently inspected. Do not claim a ChatGPT VM boot before this step is executed.
+
+**Parallel production run 40922779780** failed *after successful shard reassembly*, because its workflow asked for legacy `STAGE-SHA256SUMS` (not included in the new stage shard format). This obsolete check has already been removed in later branch versions. The newer #40971481022 workflow was still preparing WIM at last check, so its result is not evidence of a second installed-Windows image.
+
+---
 # 2026-10-30 — FIRST SUCCESSFUL READY TINY11 QCOW2, RECOVERED IN CHATGPT
 
 **Ready Windows image is confirmed built and published** in
