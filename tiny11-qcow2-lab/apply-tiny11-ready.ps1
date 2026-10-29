@@ -46,6 +46,15 @@ try {
   & dism.exe /Apply-Image "/ImageFile:$image" /Index:1 /ApplyDir:W:\ /CheckIntegrity |
     Tee-Object -FilePath (Join-Path $report 'apply-image.txt') | Out-Host
   if($LASTEXITCODE -ne 0){throw "DISM Apply-Image failed: $LASTEXITCODE"}
+  # The upstream Tiny11 Builder adds a Sysprep/autounattend.xml intended for
+  # installer-ISO mode. Direct DISM /Apply-Image never runs that installer.
+  # Remove the conflicting oobeSystem answer file so the one we install
+  # below is authoritative (local vmuser, first login and clean shutdown).
+  $upstreamAnswer='W:\Windows\System32\Sysprep\autounattend.xml'
+  if(Test-Path -LiteralPath $upstreamAnswer){
+    Remove-Item -LiteralPath $upstreamAnswer -Force -ErrorAction Stop
+    Write-Host 'Removed upstream installer-only autounattend.xml to avoid OOBE collisions'
+  }
   # Make a ready-to-boot *normal* Windows installation, not an Audit Mode image.
   # Generate a unique local account credential; never print the secret to CI logs.
   $pwd='VM-'+[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(18))+'!'
