@@ -30,9 +30,11 @@ jobs:
           ./lib/ld-linux-x86-64.so.2 --library-path ./lib ./bin/qemu-img info debian13.qcow2
           timeout 35s ./start.sh > ../boot.log 2>&1 || code=$?
           echo "QEMU exit code: ${code:-0}"
+          cat ../boot.log
           grep -Ei 'Linux version|Debian GNU/Linux|login:|root@|VFS: Mounted root|Starting kernel' ../boot.log | tail -n 20 || true
           test "${code:-0}" = 124 || test "${code:-0}" = 0
       - name: Upload bundle
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: debian13-qemu-tcg-bundle
