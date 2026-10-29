@@ -1,0 +1,35 @@
+name: Windows PE QEMU TCG compatibility test
+on:
+  push:
+    branches:
+      - windows-qemu-lab-20261029
+    paths:
+      - 'windows-vm-lab/**'
+      - '.github/workflows/windows-qemu-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-tcg:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build official WinPE ISO from Microsoft ADK
+        shell: pwsh
+        timeout-minutes: 50
+        run: |
+          ./windows-vm-lab/prepare-winpe.ps1
+      - name: Start Windows PE VM in QEMU with software TCG
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          ./windows-vm-lab/test-winpe.ps1
+      - name: Upload diagnostics (NO proprietary Windows ISO)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-qemu-tcg-test-logs
+          path: windows-vm-lab-logs/
+          if-no-files-found: warn
+          retention-days: 7
