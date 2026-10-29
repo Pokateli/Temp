@@ -65,7 +65,7 @@ exec "$BASE/lib/ld-linux-x86-64.so.2" --library-path "$BASE/lib" \
   -machine pc,accel=tcg -cpu max \
   -smp 2 -m 2048 -nographic -nic none \
   -drive "file=$BASE/debian13.qcow2,format=qcow2,if=virtio" \
-  -drive "file=fat:ro:$BASE/sharefiles,format=raw,if=virtio"
+  -drive "file=fat:ro:$BASE/sharefiles,format=raw,if=virtio,readonly=on"
 START
 chmod +x "$DEST/start.sh"
 cat > "$DEST/sharefiles/README.txt" <<'SHARE'
