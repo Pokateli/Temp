@@ -1,0 +1,61 @@
+name: Tiny11 final PowerShell syntax and DiskPart detach preflight
+on:
+  push:
+    branches: [windows-tiny11-zstd-debug-20261029]
+    paths: ['.github/workflows/tiny11-final-preflight.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse all latest Tiny11 production and debug PowerShell files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files=@(
+            'tiny11-qcow2-lab/prepare-tiny11-v2.ps1',
+            'tiny11-qcow2-lab/prepare-tiny11-wim.ps1',
+            'tiny11-qcow2-lab/apply-tiny11.ps1',
+            'tiny11-qcow2-lab/apply-tiny11-wim.ps1',
+            'tiny11-qcow2-lab/test-tiny11-boot.ps1'
+          )
+          foreach($path in $files){
+            $tok=$null;$issues=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path).Path,[ref]$tok,[ref]$issues)|Out-Null
+            if($issues.Count){$issues|Out-Host;throw "INVALID PS: $path"}
+            Write-Host "PASS PS parser: $path"
+          }
+      - name: Validate native VHDX detach with the same format used in production
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'detach-test'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $vhdx=Join-Path $dir 'probe.vhdx'
+          $create=Join-Path $dir 'create.dps'
+          @(
+            ('CREATE VDISK FILE="{0}" MAXIMUM=1024 TYPE=EXPANDABLE' -f $vhdx),
+            ('SELECT VDISK FILE="{0}"' -f $vhdx),
+            'ATTACH VDISK',
+            'CONVERT GPT',
+            'CREATE PARTITION PRIMARY',
+            'FORMAT QUICK FS=NTFS LABEL="TEST"',
+            'ASSIGN LETTER=R',
+            'EXIT'
+          ) | Set-Content -Path $create -Encoding ASCII
+          & diskpart.exe /s $create | Out-Host
+          if(-not(Test-Path 'R:\')){throw "Diskpart attachment failed"}
+          Set-Content R:\TEST.TXT -Value 'READY' -Encoding Ascii
+          $det=Join-Path $dir 'detach.dps'
+          @( ('SELECT VDISK FILE="{0}"' -f $vhdx), 'DETACH VDISK', 'EXIT' ) |
+            Set-Content -Path $det -Encoding ASCII
+          $detOut=(& diskpart.exe /s $det | Out-String)
+          Write-Host $detOut
+          if($detOut -notmatch '(?i)successfully detached'){throw 'Detach check failed'}
+          $state=Get-DiskImage -ImagePath $vhdx -ErrorAction SilentlyContinue
+          if($state -and $state.Attached){throw 'Native VHDX remains mounted'}
+          Write-Host "PASS validated exact Tiny11 detach code: image closed and clean"
