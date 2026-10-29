@@ -21,11 +21,13 @@ jobs:
           ls -lah /usr/share/OVMF/
           cp /usr/share/OVMF/OVMF_CODE_4M.fd output/OVMF_CODE.fd
           cp /usr/share/OVMF/OVMF_VARS_4M.fd output/OVMF_VARS.fd
-          (cd output && sha256sum OVMF_CODE.fd OVMF_VARS.fd > SHA256SUMS)
+          cp output/OVMF_VARS.fd /tmp/OVMF_VARS-smoketest.fd
           timeout 8s qemu-system-x86_64 -machine pc,accel=tcg -cpu max -m 512 -smp 1 \
             -display none -monitor none -nic none \
             -drive if=pflash,format=raw,readonly=on,file=output/OVMF_CODE.fd \
-            -drive if=pflash,format=raw,file=output/OVMF_VARS.fd || status=$?
+            -drive if=pflash,format=raw,file=/tmp/OVMF_VARS-smoketest.fd || status=$?
+          (cd output && sha256sum OVMF_CODE.fd OVMF_VARS.fd > SHA256SUMS)
+          (cd output && sha256sum -c SHA256SUMS)
           test "${status:-0}" = 124 || test "${status:-0}" = 0
       - uses: actions/upload-artifact@v4
         with:
