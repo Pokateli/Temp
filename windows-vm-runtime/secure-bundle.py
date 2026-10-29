@@ -36,7 +36,7 @@ def main():
         if manifest.get("version")!=1 or manifest.get("cipher")!="AES-256-GCM":
             raise SystemExit("Unsupported encrypted bundle format")
         salt=bytes.fromhex(manifest["kdf_salt"])
-    key=hashlib.scrypt(secret.encode("utf-8"),salt=salt,n=32768,r=8,p=1,dklen=32)
+    key=hashlib.scrypt(secret.encode("utf-8"),salt=salt,n=32768,r=8,p=1,dklen=32,maxmem=128*1024*1024)
     aes=AESGCM(key)
     dest=x.destination.resolve()
     dest.mkdir(parents=True,exist_ok=True)
