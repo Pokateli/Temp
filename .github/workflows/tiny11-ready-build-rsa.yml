@@ -1,0 +1,300 @@
+name: Tiny11 ready disk - encrypted RSA package for ChatGPT
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - '.github/workflows/tiny11-ready-build-rsa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare-ready:
+    runs-on: windows-2022
+    timeout-minutes: 340
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check scripts, manifest and encryption prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($f in @(
+            'tiny11-qcow2-lab/prepare-tiny11-wim.ps1',
+            'tiny11-qcow2-lab/apply-tiny11-ready.ps1',
+            'tiny11-qcow2-lab/finalize-ready.ps1'
+          )){
+            $tok=$null;$errors=$null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tok,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|Out-Host;throw "PowerShell syntax invalid: $f"}
+            Write-Host "PASS syntax: $f"
+          }
+          python -m py_compile windows-vm-runtime/dual-run.py windows-vm-runtime/secure-bundle.py
+          if($LASTEXITCODE -ne 0){throw 'Python scripts did not compile'}
+      - name: 1. Download and hash verify official Microsoft evaluation ISO
+        shell: pwsh
+        timeout-minutes: 20
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Download
+      - name: 2. Customize Tiny11 WIM (no redundant installer ISO)
+        shell: pwsh
+        timeout-minutes: 85
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Build
+      - name: 3. Install Windows with normal OOBE and generated local account in GPT VHDX
+        shell: pwsh
+        timeout-minutes: 60
+        run: ./tiny11-qcow2-lab/apply-tiny11-ready.ps1
+      - name: 4. Boot Windows ONCE, finish OOBE, shutdown, freeze standalone ZSTD ready QCOW2
+        shell: pwsh
+        timeout-minutes: 60
+        run: ./tiny11-qcow2-lab/finalize-ready.ps1
+      - name: 5. Verify prepared ready manifest and next-boot behavior on GitHub QEMU TCG
+        shell: pwsh
+        timeout-minutes: 28
+        run: |
+          $dir=Join-Path $env:RUNNER_TEMP 'tiny11-lab'
+          python windows-vm-runtime/dual-run.py verify --vm-dir $dir
+          if($LASTEXITCODE -ne 0){throw 'Ready disk integrity validation failed'}
+          python windows-vm-runtime/dual-run.py probe --headless --vm-dir $dir --seconds 1000
+          if($LASTEXITCODE -ne 0){throw 'Previously installed Tiny11 did not boot in the reusable session'}
+      - name: 6. RSA-OAEP + AES-GCM encrypt standalone ready Windows disk and UEFI credentials
+        shell: pwsh
+        timeout-minutes: 35
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --disable-pip-version-check 'cryptography>=44,<48' --quiet
+          if($LASTEXITCODE -ne 0){throw 'AES-256-GCM cryptography dependency unavailable'}
+          $root=Join-Path $env:RUNNER_TEMP 'tiny11-lab'
+          $file=Join-Path $root 'tiny11-ready-zstd.qcow2'
+          if(-not(Test-Path $file)){throw 'Ready Windows disk did not pass first-boot test'}
+          $archive=Join-Path $root 'tiny11-ready-private.tar'
+          $parts=@('tiny11-ready-zstd.qcow2','tiny11-ready-manifest.json','OVMF_CODE.fd','OVMF_VARS.fd','ready-credentials.txt','SHA256SUMS')
+          foreach($p in $parts){if(-not(Test-Path (Join-Path $root $p))){throw "Missing ready component: $p"}}
+          & tar.exe -cf $archive -C $root @parts
+          if($LASTEXITCODE -ne 0){throw 'Ready Windows packaging failed'}
+          python windows-vm-runtime/rsa-transfer.py encrypt $archive "$env:RUNNER_TEMP/tiny11-rsa-encrypted" --key windows-vm-runtime/transit-public.pem
+          if($LASTEXITCODE -ne 0){throw 'RSA-OAEP/AES-GCM encryption failed'}
+          Remove-Item -LiteralPath $archive -Force
+      - name: 7. Split encrypted ready Windows image into connector-sized artifacts (<450 MiB each)
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $source=Join-Path $env:RUNNER_TEMP 'tiny11-rsa-encrypted'
+          $root=Join-Path $env:GITHUB_WORKSPACE 'rsa-ready-shards'
+          $shards=24
+          for($i=0;$i -lt $shards;$i++){New-Item -ItemType Directory -Force -Path (Join-Path $root ('{0:d2}' -f $i))|Out-Null}
+          Copy-Item (Join-Path $source 'manifest.json') (Join-Path $root '00/manifest.json') -Force
+          $size=@(0)*$shards
+          $files=@(Get-ChildItem -LiteralPath $source -Filter 'chunk-*.bin'|Sort-Object Name)
+          if($files.Count -lt 2){throw 'Encrypted chunks missing'}
+          for($i=0;$i -lt $files.Count;$i++){
+            $g=$i%$shards
+            $dest=Join-Path $root ('{0:d2}' -f $g)
+            Move-Item -LiteralPath $files[$i].FullName -Destination $dest
+            $size[$g]+=$files[$i].Length
+          }
+          $limit=450MB
+          if(($size|Measure-Object -Maximum).Maximum -ge $limit){throw 'An encrypted shard exceeds 450 MiB GitHub Connector limit'}
+          Write-Host "Ready image encrypted and split: $($files.Count) chunks across $shards shards. Largest shard $((($size|Measure-Object -Maximum).Maximum)/1MB) MiB"
+      - name: Upload encrypted ready disk shard 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-00
+          path: rsa-ready-shards/00/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-01
+          path: rsa-ready-shards/01/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-02
+          path: rsa-ready-shards/02/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-03
+          path: rsa-ready-shards/03/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-04
+          path: rsa-ready-shards/04/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-05
+          path: rsa-ready-shards/05/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 06
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-06
+          path: rsa-ready-shards/06/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 07
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-07
+          path: rsa-ready-shards/07/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 08
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-08
+          path: rsa-ready-shards/08/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 09
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-09
+          path: rsa-ready-shards/09/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 10
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-10
+          path: rsa-ready-shards/10/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 11
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-11
+          path: rsa-ready-shards/11/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 12
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-12
+          path: rsa-ready-shards/12/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 13
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-13
+          path: rsa-ready-shards/13/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 14
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-14
+          path: rsa-ready-shards/14/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 15
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-15
+          path: rsa-ready-shards/15/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 16
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-16
+          path: rsa-ready-shards/16/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 17
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-17
+          path: rsa-ready-shards/17/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 18
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-18
+          path: rsa-ready-shards/18/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 19
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-19
+          path: rsa-ready-shards/19/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-20
+          path: rsa-ready-shards/20/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 21
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-21
+          path: rsa-ready-shards/21/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-22
+          path: rsa-ready-shards/22/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload encrypted ready disk shard 23
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-23
+          path: rsa-ready-shards/23/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Upload diagnostics without Microsoft OS files or account credentials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-rsa-build-logs
+          path: tiny11-qcow2-logs/
+          retention-days: 14
+          if-no-files-found: warn
