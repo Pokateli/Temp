@@ -32,7 +32,8 @@ $argumentList = @(
   '-m','3072',
   '-no-reboot',
   '-display','none',
-  '-monitor','none',
+  '-vga','std',
+  '-monitor','tcp:127.0.0.1:4444,server=on,wait=off',
   '-serial',"file:$serialLog",
   '-nic','none',
   '-boot','order=d',
@@ -44,9 +45,29 @@ Write-Host ("args: " + ($argumentList -join ' '))
 $p = Start-Process -FilePath $qemu -ArgumentList $argumentList -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 $ready = $false
 try {
-  $deadline = (Get-Date).AddMinutes(14)
+  $deadline = (Get-Date).AddMinutes(5)
+  $start = Get-Date
+  $captured = @{}
   while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 5
+    $elapsed = ((Get-Date) - $start).TotalSeconds
+    foreach ($seconds in @(45,120,240)) {
+      if ($elapsed -ge $seconds -and -not $captured.ContainsKey($seconds)) {
+        $captured[$seconds] = $true
+        $shot = (Join-Path $logs ("screen-" + $seconds + ".ppm")).Replace('\','/')
+        try {
+          $socket = [System.Net.Sockets.TcpClient]::new('127.0.0.1',4444)
+          $stream = $socket.GetStream()
+          $writer = [System.IO.StreamWriter]::new($stream,[System.Text.Encoding]::ASCII)
+          $writer.AutoFlush = $true
+          $writer.WriteLine("screendump $shot")
+          Start-Sleep -Milliseconds 500
+          $writer.Dispose()
+          $socket.Dispose()
+          Write-Host "Requested QEMU screenshot: $shot"
+        } catch { Write-Warning "Screenshot failed: $_" }
+      }
+    }
     if (Test-Path $marker) {
       $contents = Get-Content -Raw $marker
       if ($contents.Contains('WINPE_READY')) {
