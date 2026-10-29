@@ -1,0 +1,97 @@
+name: Tiny11 prepare-once ready disk (dual GitHub + ChatGPT)
+on:
+  push:
+    branches: [windows-tiny11-dual-ready-20261029]
+    paths:
+      - '.github/workflows/tiny11-ready-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare-ready:
+    runs-on: windows-2022
+    timeout-minutes: 330
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check scripts, manifest and encryption prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($f in @(
+            'tiny11-qcow2-lab/prepare-tiny11-wim.ps1',
+            'tiny11-qcow2-lab/apply-tiny11-ready.ps1',
+            'tiny11-qcow2-lab/finalize-ready.ps1'
+          )){
+            $tok=$null;$errors=$null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tok,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|Out-Host;throw "PowerShell syntax invalid: $f"}
+            Write-Host "PASS syntax: $f"
+          }
+          python -m py_compile windows-vm-runtime/dual-run.py windows-vm-runtime/secure-bundle.py
+          if($LASTEXITCODE -ne 0){throw 'Python scripts did not compile'}
+      - name: 1. Download and hash verify official Microsoft evaluation ISO
+        shell: pwsh
+        timeout-minutes: 20
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Download
+      - name: 2. Customize Tiny11 WIM (no redundant installer ISO)
+        shell: pwsh
+        timeout-minutes: 85
+        run: ./tiny11-qcow2-lab/prepare-tiny11-wim.ps1 -Stage Build
+      - name: 3. Install Windows with normal OOBE and generated local account in GPT VHDX
+        shell: pwsh
+        timeout-minutes: 60
+        run: ./tiny11-qcow2-lab/apply-tiny11-ready.ps1
+      - name: 4. Boot Windows ONCE, finish OOBE, shutdown, freeze standalone ZSTD ready QCOW2
+        shell: pwsh
+        timeout-minutes: 60
+        run: ./tiny11-qcow2-lab/finalize-ready.ps1
+      - name: 5. Verify prepared ready manifest and next-boot behavior on GitHub QEMU TCG
+        shell: pwsh
+        timeout-minutes: 28
+        run: |
+          $dir=Join-Path $env:RUNNER_TEMP 'tiny11-lab'
+          python windows-vm-runtime/dual-run.py verify --vm-dir $dir
+          if($LASTEXITCODE -ne 0){throw 'Ready disk integrity validation failed'}
+          python windows-vm-runtime/dual-run.py probe --headless --vm-dir $dir --seconds 1000
+          if($LASTEXITCODE -ne 0){throw 'Previously installed Tiny11 did not boot in the reusable session'}
+      - name: 6. Encrypt ready OS disk, UEFI, manifest and credentials into 128MiB chunks (opt-in)
+        shell: pwsh
+        id: encrypted
+        timeout-minutes: 50
+        env:
+          TINY11_ARCHIVE_PASSPHRASE: ${{ secrets.TINY11_ARCHIVE_PASSPHRASE }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if([string]::IsNullOrEmpty($env:TINY11_ARCHIVE_PASSPHRASE)){
+            Write-Host 'Not uploading OS to public Temp. Set Actions secret TINY11_ARCHIVE_PASSPHRASE (16+ chars) to enable encrypted deliverable.'
+            'ready=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding UTF8
+            exit 0
+          }
+          if($env:TINY11_ARCHIVE_PASSPHRASE.Length -lt 16){throw 'Encryption passphrase must be at least 16 characters'}
+          python -m pip install --disable-pip-version-check 'cryptography>=44,<48' --quiet
+          if($LASTEXITCODE -ne 0){throw 'Python AES-GCM dependency unavailable'}
+          $dir=Join-Path $env:RUNNER_TEMP 'tiny11-lab'
+          python windows-vm-runtime/secure-bundle.py encrypt $dir "$env:GITHUB_WORKSPACE/tiny11-encrypted"
+          if($LASTEXITCODE -ne 0){throw 'Encrypted OS export failed'}
+          'ready=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding UTF8
+      - name: Upload authenticated ENCRYPTED Windows-ready archive only
+        if: steps.encrypted.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-encrypted-v1
+          path: tiny11-encrypted/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+      - name: Always upload NON-OS diagnostics only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-ready-build-logs
+          path: tiny11-qcow2-logs/
+          retention-days: 14
+          if-no-files-found: warn
