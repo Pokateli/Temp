@@ -58,6 +58,15 @@ wpeutil shutdown
 } finally {
     if ($mounted) { Dismount-WindowsImage -Path $mount -Discard | Out-Host }
 }
+# Microsoft BIOS bootfix.bin produces the unattended-blocking "Press any key" prompt.
+# Removing it is the supported headless BIOS WinPE technique.
+$bootfix = Join-Path $work 'media\\boot\\bootfix.bin'
+if (Test-Path $bootfix) {
+    Remove-Item -LiteralPath $bootfix -Force
+    Write-Host "Disabled BIOS CD boot key prompt: $bootfix"
+} else {
+    Write-Host "BIOS bootfix.bin already absent"
+}
 Write-Host "Create bootable ISO $iso"
 & cmd.exe /d /s /c ('call "' + $envbat + '" && call "' + $media + '" /ISO "' + $work + '" "' + $iso + '"')
 if ($LASTEXITCODE -ne 0) { throw 'MakeWinPEMedia failed' }
