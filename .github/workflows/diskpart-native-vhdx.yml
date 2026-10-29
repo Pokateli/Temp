@@ -27,7 +27,7 @@ jobs:
           for($i=0;$i -lt $scenarios.Count;$i++){
             $script=Join-Path $root ("probe-$i.txt")
             $scenarios[$i] | Set-Content -Path $script -Encoding ASCII
-            Write-Host "DiskPart input $i: $(Get-Content $script -Raw)"
+            Write-Host "DiskPart input ${i}: $(Get-Content $script -Raw)"
             & diskpart.exe /s $script | Out-Host
             if(Test-Path $vhdx){
               Write-Host "Created VHDX with scenario $i"
