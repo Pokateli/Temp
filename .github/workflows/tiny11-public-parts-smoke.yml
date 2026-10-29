@@ -60,3 +60,28 @@ jobs:
           python3 windows-vm-runtime/ready-parts.py unpack /tmp/tiny11-cross-parts /tmp/tiny11-cross-out
           cmp /tmp/tiny11-cross-in/tiny11-ready-zstd.qcow2 /tmp/tiny11-cross-out/tiny11-ready-zstd.qcow2
           echo 'PASS: restored 385MiB crossing chunk boundary'
+      - name: Confirm stage pack/unpack includes QCOW2 and credentials without copying the whole ISO
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/tiny11-stage-in /tmp/tiny11-stage-parts /tmp/tiny11-stage-out
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/tiny11-stage-in')
+          with (root/'tiny11-zstd.qcow2').open('wb') as f:
+              f.seek(385*1024*1024-1)
+              f.write(b'Q')
+          (root/'ready-credentials.txt').write_text('Username: synthetic-vmuser\\nPassword: synthetic-only-do-not-use\\n')
+          PY
+          python3 windows-vm-runtime/ready-parts.py pack /tmp/tiny11-stage-in /tmp/tiny11-stage-parts --kind stage
+          python3 windows-vm-runtime/ready-parts.py unpack /tmp/tiny11-stage-parts /tmp/tiny11-stage-out --kind stage
+          for f in /tmp/tiny11-stage-in/*; do cmp "$f" "/tmp/tiny11-stage-out/$(basename "$f")"; done
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/tiny11-stage-parts/stage-parts.json'))
+          assert p['format']=='tiny11-stage-public-parts-v1'
+          assert len(p['parts'])>=2
+          assert sorted(p['members'])==['ready-credentials.txt','tiny11-zstd.qcow2']
+          assert all(x['size']<=384*1024*1024 for x in p['parts'])
+          print('PASS stage transfer:',len(p['parts']),'chunks; both files recovered with SHA256')
+          PY
