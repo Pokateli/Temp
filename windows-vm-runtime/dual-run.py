@@ -151,14 +151,18 @@ def main():
         # QEMU's vvfat backend can delay making Windows guest writes visible to
         # the host until QEMU exits. Do NOT decide success before final flush.
         proof=ready.read_text(errors="replace") if ready.is_file() else ""
+        serial_path=root/"qemu-serial.log"
+        serial_proof=serial_path.read_text(errors="replace") if serial_path.is_file() else ""
+        fat_confirmed=("TINY11_INSTALLED_READY" in proof and "COMPUTER=" in proof)
+        serial_confirmed="TINY11_INSTALLED_READY SECOND_BOOT_CONFIRMED" in serial_proof
         success=(not timed_out and proc.returncode==0 and
-                 "TINY11_INSTALLED_READY" in proof and
-                 "COMPUTER=" in proof)
+                 (fat_confirmed or serial_confirmed))
         if success:
             print("PASS: already-installed Windows wrote startup proof and powered off cleanly",flush=True)
         result={"boot_confirmed":success,"runtime":"qemu-tcg","probe_seconds":opt.seconds,
                 "guest_shutdown_clean":proc.returncode==0 and not timed_out,
                 "qemu_exit_code":proc.returncode,"probe_timed_out":timed_out,
+                "fat_marker_confirmed":fat_confirmed,"serial_marker_confirmed":serial_confirmed,
                 "guest_ready_file":str(ready),"log":str(log),"image_sha256":meta["disk_sha256"]}
         (root/"probe-result.json").write_text(json.dumps(result,indent=2)+"\n")
         print(json.dumps(result,indent=2))
