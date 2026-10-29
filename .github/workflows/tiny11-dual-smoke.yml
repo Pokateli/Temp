@@ -68,3 +68,22 @@ jobs:
           python3 windows-vm-runtime/dual-run.py verify --vm-dir /tmp/tiny11-restored
           cmp /tmp/tiny11-test/tiny11-ready-zstd.qcow2 /tmp/tiny11-restored/tiny11-ready-zstd.qcow2
           echo 'PASS encrypted chunked transport, decrypted base disk and OVMF'
+      - name: Package synthetic portable VM test kit for direct ChatGPT sandbox validation
+        run: |
+          set -Eeuo pipefail
+          mkdir -p tiny11-sandbox-smoke
+          cp /tmp/tiny11-test/tiny11-ready-zstd.qcow2 \
+            /tmp/tiny11-test/OVMF_CODE.fd \
+            /tmp/tiny11-test/OVMF_VARS.fd \
+            /tmp/tiny11-test/tiny11-ready-manifest.json \
+            /tmp/tiny11-test/ready-credentials.txt \
+            /tmp/tiny11-test/SHA256SUMS \
+            tiny11-sandbox-smoke/
+          cp -a windows-vm-runtime tiny11-sandbox-smoke/
+          echo 'Synthetic disk ONLY. Not Windows. Install QEMU TCG and run python3 windows-vm-runtime/dual-run.py verify --vm-dir . ' > tiny11-sandbox-smoke/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiny11-sandbox-synthetic-dual-test
+          path: tiny11-sandbox-smoke/
+          compression-level: 3
+          retention-days: 7
