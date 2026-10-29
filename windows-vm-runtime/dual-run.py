@@ -46,6 +46,8 @@ def main():
     p.add_argument("--qemu-home",default=os.environ.get("QEMU_HOME"))
     p.add_argument("--ram",type=int,default=2560,help="guest RAM in MiB")
     p.add_argument("--cpus",type=int,default=2)
+    p.add_argument("--accelerator",choices=("tcg","kvm"),default="tcg",
+                   help="KVM is for GitHub Ubuntu runner with /dev/kvm; sandbox defaults to TCG")
     p.add_argument("--headless",action="store_true",help="QEMU no GUI; VGA screenshots through monitor")
     p.add_argument("--seconds",type=int,default=600,help="probe time budget")
     p.add_argument("--reset-session",action="store_true",help="delete saved overlay and session UEFI vars")
@@ -114,7 +116,9 @@ def main():
     if opt.qemu_home:
         candidate=Path(opt.qemu_home)/"share"/"qemu"
         if candidate.is_dir():cmd+=["-L",str(candidate)]
-    cmd+=["-machine","pc,accel=tcg","-cpu","max","-smp",str(opt.cpus),"-m",str(opt.ram),
+    cmd+=["-machine","pc,accel="+opt.accelerator,
+          "-cpu","host" if opt.accelerator=="kvm" else "max",
+          "-smp",str(opt.cpus),"-m",str(opt.ram),
           "-drive","if=pflash,format=raw,readonly=on,file="+str(code),
           "-drive","if=pflash,format=raw,file="+str(session_vars),
           "-drive","if=ide,format=qcow2,file="+str(overlay),
@@ -126,7 +130,7 @@ def main():
         cmd+=["-monitor","tcp:127.0.0.1:4444,server=on,wait=off"]
     else:cmd+=["-monitor","unix:"+str(monitor)+",server=on,wait=off"]
     cmd+=["-serial","file:"+str(root/"qemu-serial.log")]
-    print("Starting installed Windows via QEMU TCG. No reinstall. Network disabled.",flush=True)
+    print("Starting installed Windows via QEMU "+opt.accelerator.upper()+". No reinstall. Network disabled.",flush=True)
     print("VNC is loopback-only on port 5900 (unless --headless).",flush=True)
     if opt.action=="start":
         rc=subprocess.call(cmd)
@@ -159,7 +163,7 @@ def main():
                  (fat_confirmed or serial_confirmed))
         if success:
             print("PASS: already-installed Windows wrote startup proof and powered off cleanly",flush=True)
-        result={"boot_confirmed":success,"runtime":"qemu-tcg","probe_seconds":opt.seconds,
+        result={"boot_confirmed":success,"runtime":"qemu-"+opt.accelerator,"probe_seconds":opt.seconds,
                 "guest_shutdown_clean":proc.returncode==0 and not timed_out,
                 "qemu_exit_code":proc.returncode,"probe_timed_out":timed_out,
                 "fat_marker_confirmed":fat_confirmed,"serial_marker_confirmed":serial_confirmed,
