@@ -1,0 +1,32 @@
+name: AWG encrypted-backup export dependency (age 1.3.2)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-age-encryption-tool.yml
+permissions:
+  contents: read
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Acquire and pin verified age release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p out
+          cd out
+          curl -fsSL --retry 3 -o age-v1.3.2-linux-amd64.tar.gz \
+            https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz
+          echo "cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10  age-v1.3.2-linux-amd64.tar.gz" | sha256sum -c -
+          tar -xzf age-v1.3.2-linux-amd64.tar.gz
+          ./age/age --version
+          ./age/age-keygen --version
+          sha256sum age-v1.3.2-linux-amd64.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-age-v1.3.2-linux-amd64
+          path: out/
+          retention-days: 30
+          compression-level: 0
