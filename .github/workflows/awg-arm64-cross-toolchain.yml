@@ -30,6 +30,7 @@ jobs:
               usr/bin/aarch64-linux-gnu-gcc-14 \
               usr/bin/aarch64-linux-gnu-as \
               usr/bin/aarch64-linux-gnu-ld \
+              usr/bin/aarch64-linux-gnu-ld.bfd \
               usr/bin/aarch64-linux-gnu-ar \
               usr/bin/aarch64-linux-gnu-ranlib \
               usr/bin/aarch64-linux-gnu-nm \
@@ -38,6 +39,8 @@ jobs:
               usr/bin/aarch64-linux-gnu-readelf \
               usr/lib/gcc-cross/aarch64-linux-gnu \
               usr/libexec/gcc-cross/aarch64-linux-gnu \
+              usr/lib/x86_64-linux-gnu/libopcodes-2.44-arm64.so \
+              usr/lib/x86_64-linux-gnu/libbfd-2.44-arm64.so \
               usr/aarch64-linux-gnu \
               usr/lib/aarch64-linux-gnu \
               usr/include/sqlite3.h \
