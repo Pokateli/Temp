@@ -1,0 +1,50 @@
+name: AWG Manager Debian 13 Tor 3proxy and sing-box offline runtime
+on:
+  push:
+    paths:
+      - .github/workflows/awg-proxy-e2e-deps.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Download Tor and signed upstream 3proxy Debian packages
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$PWD/packages"
+          docker run --rm -v "$PWD/packages:/out" debian:13-slim bash -euc '
+            apt-get update
+            apt-get install -y ca-certificates curl
+            curl -fsSL https://3proxy.org/repo/3proxy-release-key.asc -o /usr/share/keyrings/3proxy.asc
+            cat > /etc/apt/sources.list.d/3proxy.sources <<EOF
+          Types: deb
+          URIs: https://3proxy.org/repo/deb
+          Suites: lts
+          Components: main
+          Signed-By: /usr/share/keyrings/3proxy.asc
+          EOF
+            apt-get update
+            apt-get --download-only -y install tor 3proxy
+            cp /var/cache/apt/archives/*.deb /out/
+            (cd /out && sha256sum *.deb > DEBIAN_SHA256SUMS)
+          '
+      - name: Download official sing-box 1.14.4 (not a fork)
+        run: |
+          set -Eeuo pipefail
+          curl -fL --retry 3 -o packages/sing-box-1.14.4-linux-amd64.tar.gz https://dl.sing-box.org/releases/latest/sing-box-1.14.4-linux-amd64.tar.gz
+          mkdir -p /tmp/awg-singbox
+          tar -xzf packages/sing-box-1.14.4-linux-amd64.tar.gz -C /tmp/awg-singbox
+          candidate="$(find /tmp/awg-singbox -type f -name sing-box | head -1)"
+          test -n "$candidate"
+          chmod +x "$candidate"
+          "$candidate" version | grep -F '1.14.4'
+          sha256sum packages/sing-box-1.14.4-linux-amd64.tar.gz > packages/SINGBOX_SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-debian13-proxy-e2e-runtime-amd64
+          path: packages/
+          compression-level: 0
+          retention-days: 30
