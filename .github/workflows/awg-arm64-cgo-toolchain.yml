@@ -1,0 +1,36 @@
+name: AWG Manager Debian13 ARM64 CGO offline cross dependencies
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-arm64-cgo-toolchain.yml
+permissions:
+  contents: read
+jobs:
+  cross:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Build offline Debian 13 AArch64 cross sysroot
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$PWD/out"
+          docker run --rm -v "$PWD/out:/out" debian:13-slim bash -euc '
+            export DEBIAN_FRONTEND=noninteractive
+            dpkg --add-architecture arm64
+            apt-get update
+            apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross libsqlite3-dev:arm64 binutils-aarch64-linux-gnu ca-certificates
+            aarch64-linux-gnu-gcc -v 2>&1 | tail -6
+            printf "#include <sqlite3.h>\nint main(void){return sqlite3_libversion_number()<1;}\n" >/tmp/test.c
+            aarch64-linux-gnu-gcc /tmp/test.c -lsqlite3 -o /tmp/test-arm64
+            file /tmp/test-arm64
+            paths="usr/bin/aarch64-linux-gnu-gcc usr/bin/aarch64-linux-gnu-as usr/bin/aarch64-linux-gnu-ld usr/bin/aarch64-linux-gnu-ar usr/lib/gcc-cross/aarch64-linux-gnu usr/aarch64-linux-gnu usr/lib/aarch64-linux-gnu usr/include/aarch64-linux-gnu"
+            tar -C / -czf /out/awg-debian13-arm64-cross-sysroot.tar.gz $paths
+            (cd /out && sha256sum awg-debian13-arm64-cross-sysroot.tar.gz > SHA256SUMS)
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-debian13-arm64-cgo-cross
+          path: out/
+          compression-level: 0
+          retention-days: 30
