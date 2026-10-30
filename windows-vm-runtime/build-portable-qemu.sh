@@ -18,7 +18,7 @@ docker run --rm --platform linux/amd64 \
   -v "$DEST:/out" debian:13 bash -euo pipefail -c '
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ca-certificates
+  apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils seabios ca-certificates
   for name in qemu-system-x86_64 qemu-img; do
     src="/usr/bin/$name"
     test -x "$src"
@@ -31,6 +31,11 @@ docker run --rm --platform linux/amd64 \
   done
   cp -L /lib64/ld-linux-x86-64.so.2 /out/lib/ld-linux-x86-64.so.2
   cp -aL /usr/share/qemu/. /out/share/qemu/
+  # VGA option ROMs are packaged separately in Debian seabios. Without
+  # these QEMU cannot start a Windows guest with -vga std at all.
+  cp -aL /usr/share/seabios/vgabios-*.bin /out/share/qemu/
+  test -s /out/share/qemu/vgabios-stdvga.bin
+  test -s /out/share/qemu/vgabios-bochs-display.bin
   /out/lib/ld-linux-x86-64.so.2 --library-path /out/lib /out/bin/qemu-img --version
   /out/lib/ld-linux-x86-64.so.2 --library-path /out/lib /out/bin/qemu-system-x86_64 -L /out/share/qemu -machine help >/dev/null
   chown -R "$HOST_UID:$HOST_GID" /out
