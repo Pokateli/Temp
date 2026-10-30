@@ -1,0 +1,54 @@
+name: AWG Manager offline frontend dependencies (SvelteKit Vite 8.2.2)
+on:
+  push:
+    paths:
+      - .github/workflows/awg-frontend-dependencies.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Resolve pinned frontend packages and bundle offline runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir frontend-offline
+          cd frontend-offline
+          cat > package.json <<'JSON'
+          {
+            "name": "awg-manager-frontend-deps-offline",
+            "version": "0.9.156",
+            "private": true,
+            "type": "module",
+            "devDependencies": {
+              "@sveltejs/adapter-static": "3.0.10",
+              "@sveltejs/kit": "2.70.3",
+              "@sveltejs/vite-plugin-svelte": "7.3.0",
+              "svelte": "5.57.0",
+              "svelte-check": "4.7.6",
+              "vite": "8.2.2"
+            },
+            "overrides": {"cookie": "0.7.2"}
+          }
+          JSON
+          npm install --no-audit --no-fund
+          node -p "'node='+process.version"
+          node -p "'svelte='+require('./node_modules/svelte/package.json').version"
+          node -p "'vite='+require('./node_modules/vite/package.json').version"
+          tar -czf ../awg-frontend-node_modules-node22-amd64.tar.gz node_modules
+          cd ..
+          sha256sum awg-frontend-node_modules-node22-amd64.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-frontend-node22-amd64-offline
+          path: |
+            awg-frontend-node_modules-node22-amd64.tar.gz
+            SHA256SUMS
+          compression-level: 0
+          retention-days: 30
