@@ -1,0 +1,35 @@
+name: AUPE AMD64 Debian 13 kernel 6.12.113 offline headers
+on:
+  push:
+    paths:
+      - .github/workflows/aupe-debian-kernel-headers-612113.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  transport:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Retrieve exact Debian security header packages
+        run: |
+          set -Eeuo pipefail
+          mkdir -p output
+          base="https://deb.debian.org/debian-security/pool/updates/main/l/linux"
+          for pkg in \
+            'linux-headers-6.12.113+deb13-common_6.12.113-1_all.deb' \
+            'linux-headers-6.12.113+deb13-amd64_6.12.113-1_amd64.deb' \
+            'linux-kbuild-6.12.113+deb13_6.12.113-1_amd64.deb'; do
+            curl -fL --retry 3 --connect-timeout 15 -o "output/$pkg" "$base/$pkg"
+            test -s "output/$pkg"
+            test "$(dpkg-deb -f "output/$pkg" Version)" = 6.12.113-1
+          done
+          (cd output && sha256sum *.deb > SHA256SUMS.txt)
+          cat output/SHA256SUMS.txt
+      - name: Transport dependencies only, no AUPE build
+        uses: actions/upload-artifact@v4
+        with:
+          name: aupe-kernel-612113-amd64-headers
+          path: output/
+          compression-level: 0
+          retention-days: 14
