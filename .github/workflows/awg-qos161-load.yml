@@ -1,0 +1,112 @@
+name: AWG QoS 0.9.161 UDP EF load and tunnel restart test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-qos161-load.yml
+permissions:
+  contents: read
+jobs:
+  load:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Real Linux HTB qdisc egress stress and interface replay
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo bash <<'SUDO'
+          set -Eeuo pipefail
+          ip netns add q161ns
+          trap 'ip link del q161a 2>/dev/null || true; ip netns del q161ns 2>/dev/null || true; kill $(jobs -pr) 2>/dev/null || true' EXIT
+          make_link() {
+            ip link add q161a type veth peer name q161b
+            ip link set q161b netns q161ns
+            ip addr add 10.61.0.1/24 dev q161a
+            ip netns exec q161ns ip addr add 10.61.0.2/24 dev q161b
+            ip link set q161a up
+            ip netns exec q161ns ip link set lo up
+            ip netns exec q161ns ip link set q161b up
+          }
+          apply_qos() {
+            tc qdisc replace dev q161a root handle 1: htb default 30 r2q 1000
+            tc class replace dev q161a parent 1: classid 1:1 htb rate 2mbit ceil 2mbit quantum 1514
+            tc class replace dev q161a parent 1:1 classid 1:1000 htb rate 2mbit ceil 2mbit quantum 1514
+            tc class replace dev q161a parent 1:1000 classid 1:5000 htb rate 1500kbit ceil 2mbit prio 5 quantum 1514
+            tc class replace dev q161a parent 1:1000 classid 1:5003 htb rate 500kbit ceil 500kbit prio 1 quantum 1514
+            tc qdisc replace dev q161a parent 1:5000 fq_codel target 5ms interval 100ms ecn
+            tc qdisc replace dev q161a parent 1:5003 fq_codel target 5ms interval 100ms ecn
+            tc filter replace dev q161a protocol ip parent 1: prio 100 flower dst_ip 10.61.0.2/32 ip_proto udp ip_tos 0xb8/0xfc classid 1:5003
+            tc filter replace dev q161a protocol ip parent 1: prio 10000 flower dst_ip 10.61.0.2/32 classid 1:5000
+          }
+          cat > /tmp/q161peer.py <<'PY'
+          import socket
+          s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+          s.bind(('10.61.0.2',26661))
+          while True:
+              data,addr=s.recvfrom(4096)
+              if data.startswith(b'RTP-'):s.sendto(data,addr)
+          PY
+          cat > /tmp/q161client.py <<'PY'
+          import socket,time,threading,statistics,subprocess,re,json
+          def counts():
+              s=subprocess.check_output(['tc','-s','class','show','dev','q161a'],text=True)
+              result={}
+              for part in re.split(r'(?=^class htb )',s,flags=re.M):
+                  a=re.search(r'^class htb ([0-9a-fA-F]+:[0-9a-fA-F]+)',part)
+                  b=re.search(r'Sent\s+(\d+)\s+bytes',part)
+                  if a:result[a.group(1).lower()]=int(b.group(1)) if b else 0
+              assert '1:5003' in result and '1:5000' in result,s
+              return result
+          stop=threading.Event()
+          def bulk():
+              s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+              payload=b'B'*1200
+              while not stop.is_set():
+                  for n in range(150):s.sendto(payload,('10.61.0.2',26662))
+              s.close()
+          baseline=counts()
+          t=threading.Thread(target=bulk,daemon=True);t.start()
+          p=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+          p.setsockopt(socket.IPPROTO_IP,socket.IP_TOS,0xb9)
+          p.settimeout(.6)
+          latencies=[]
+          for n in range(100):
+              payload=b'RTP-'+n.to_bytes(4,'big')
+              start=time.monotonic()
+              p.sendto(payload,('10.61.0.2',26661))
+              try:
+                  data,remote=p.recvfrom(100)
+                  if data==payload:latencies.append((time.monotonic()-start)*1000)
+              except TimeoutError:pass
+              time.sleep(.015)
+          stop.set();t.join(timeout=2);p.close()
+          final=counts()
+          v=sorted(latencies)
+          if not v:raise RuntimeError('No RTP replies')
+          percentile=lambda k:round(v[min(len(v)-1,int((len(v)-1)*k))],3)
+          result={'sent':100,'received':len(v),'p50_ms':percentile(.50),'p95_ms':percentile(.95),
+                  'p99_ms':percentile(.99),'jitter_std_ms':round(statistics.pstdev(v),3),
+                  'voice_bytes':final['1:5003']-baseline['1:5003'],
+                  'normal_bytes':final['1:5000']-baseline['1:5000']}
+          print('QOS161_LOAD_RESULT',json.dumps(result,sort_keys=True))
+          assert len(v)>=75,result
+          assert result['voice_bytes']>0 and result['normal_bytes']>0,result
+          print('QOS161_LOAD_PASS')
+          PY
+          make_link
+          apply_qos
+          ip netns exec q161ns python3 -u /tmp/q161peer.py >/tmp/q161-peer.log 2>&1 &
+          sleep 0.3
+          python3 /tmp/q161client.py
+          echo "BEFORE_RESTART"
+          tc -s class show dev q161a
+          ip link del q161a
+          make_link
+          if tc qdisc show dev q161a | grep -q 'htb 1:'; then
+             echo "unexpected stale HTB after link recreation" >&2; exit 1
+          fi
+          apply_qos
+          tc -s class show dev q161a | grep -q 'class htb 1:5003'
+          echo 'QOS161_REPLAY_AFTER_RESTART_PASS'
+          SUDO
