@@ -1,0 +1,33 @@
+name: AWG Manager Debian13 ARM64 offline install dependencies
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-arm64-runtime-debs.yml
+permissions:
+  contents: read
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Download ARM64 packages and complete dependencies with Debian apt
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$PWD/arm-debs"
+          docker run --rm -v "$PWD/arm-debs:/out" debian:13-slim bash -euc '
+            export DEBIAN_FRONTEND=noninteractive
+            dpkg --add-architecture arm64
+            apt-get update
+            apt-get -o APT::Architecture=arm64 -y --download-only install \
+              gnupg:arm64 lftp:arm64 nftables:arm64 qrencode:arm64 unzip:arm64 zip:arm64
+            cp -v /var/cache/apt/archives/*.deb /out/
+            (cd /out && sha256sum *.deb > SHA256SUMS)
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-debian13-arm64-install-debs
+          path: arm-debs/
+          compression-level: 0
+          retention-days: 30
