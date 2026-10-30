@@ -1,3 +1,53 @@
+## 2026-10-30 — Tiny11 GUI desktop confirmed inside ChatGPT sandbox
+
+**MAJOR MILESTONE: ACTUAL WINDOWS DESKTOP RENDERED under QEMU TCG, without KVM.**
+The previously published Windows 11 Enterprise Evaluation ZSTD-QCOW2 from
+[run 40928819947](https://github.com/Pokateli/Temp/actions/runs/40928819947)
+was imported into the current chat container. Its full 20 GitHub ZIP shards
+were read and all shard/file SHA256 checks passed; base SHA256:
+`9d6b897b3ba5326b6de380b8ef48898c5c9f561b65e4b44507eb713e4300d402`.
+
+Rebuilt portable Linux QEMU 10.0.13 with `seabios` `vgabios-stdvga.bin`
+ROMs in [run 41013832628](https://github.com/Pokateli/Temp/actions/runs/41013832628)
+(complete/success). The earlier portable QEMU omitted VGA ROMs; it could
+start headless with `-vga none` but could not render the Windows desktop.
+The current VM boots with `-machine pc,accel=tcg -cpu max -smp 2 -m 2560
+-display none -vga std -nic none`, using 4M OVMF pflash, a new writable
+QCOW2 overlay, local Unix HMP monitor and isolated guest-visible FAT drive.
+
+Confirmed **real interactive Windows 11 desktop** on 2026-10-30 from QEMU
+`screendump` at 1280x800: wallpaper, Recycle Bin, taskbar, clock, Explorer,
+and `Windows 11 Enterprise Evaluation` watermark. An additional framebuffer
+capture showed the Windows **Run** dialog, opened by QEMU `sendkey meta_l-r`.
+Guest generated `TINY11_INSTALLED_READY.TXT` on the FAT disk:
+`Microsoft Windows [Version 10.0.26300.9457]`, computer
+`DESKTOP-2CB37I7`. The desktop screenshot is in the ChatGPT container at
+`/mnt/data/tiny11-graphics-session/screen-07min.png`; **not in GitHub
+artifacts**. The active VM session path is
+`/mnt/data/tiny11-graphics-session` (may not survive a new chat/container).
+
+Actual ChatGPT TCG VM also entered **ACPI suspend** on its idle path and was
+successfully woken with HMP `system_wakeup` (prior headless session).
+Future Tiny11 image builds now execute `powercfg /change standby-timeout-ac 0`
+and `powercfg /change standby-timeout-dc 0` at first login and each ONSTART
+probe to prevent guest S3 while idle. This change is in the source builder;
+it does **not** retroactively change the published immutable base image.
+[Windows marker preflight 41017350470](https://github.com/Pokateli/Temp/actions/runs/41017350470)
+passed after the sleep settings change.
+
+The existing local helper `windows-vm-runtime/vm-control.py` now accepts
+`status`, `screenshot`, `wake`, `powerdown`, and restricted `sendkey`
+actions over a local QEMU monitor. Example:
+`python3 windows-vm-runtime/vm-control.py screenshot --vm-dir /mnt/data/tiny11-graphics-session --output /mnt/data/tiny11-graphics-session/desktop.png`.
+This can capture real Windows GUIs but **does not provide a persistent
+interactive graphical desktop in the ChatGPT UI**. In GitHub use KVM for
+fast boot; in ChatGPT use TCG with the complete VGA-enabled QEMU package.
+
+Important licensing: the desktop watermark shows
+`Windows license is expired`; this is an evaluation OS image and is not
+suitable for long-term production use until a properly licensed image is used.
+
+---
 Additional VM control helper: `windows-vm-runtime/vm-control.py`
 supports local QEMU HMP status/screenshot/ACPI shutdown for a running VM;
 the synthetic dual-QEMU workflow validates its Python syntax.
