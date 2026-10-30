@@ -50,8 +50,23 @@ jobs:
           python3 - <<'PY'
           import json,socket,subprocess,time
           def counters():
-              records=json.loads(subprocess.check_output(['tc','-j','-s','class','show','dev','awg160v0'],text=True))
-              return {str(x.get('handle') or x.get('classid')):int(x.get('bytes',x.get('stats',{}).get('bytes',0))) for x in records}
+              # GitHub runner iproute2 may print an empty/non-JSON result for
+              # 'tc -j -s class show', even when textual class stats exist.
+              import re
+              output=subprocess.check_output(['tc','-s','class','show','dev','awg160v0'],text=True)
+              if not output.strip():
+                  print('TC_DIAG_QDISC',subprocess.getoutput('tc -s qdisc show dev awg160v0'))
+                  print('TC_DIAG_FILTER',subprocess.getoutput('tc -s filter show dev awg160v0'))
+                  raise AssertionError('No HTB classes reported by kernel')
+              result={}
+              for part in re.split(r'(?=^class htb )',output,flags=re.M):
+                  m=re.search(r'^class htb ([0-9a-fA-F]+:[0-9a-fA-F]+)',part)
+                  if not m: continue
+                  sent=re.search(r'Sent\\s+(\\d+)\\s+bytes',part)
+                  result[m.group(1).lower()]=int(sent.group(1)) if sent else 0
+              print('TC_CLASS_STATS',result)
+              assert '1:5003' in result and '1:5000' in result and '1:5004' in result, output
+              return result
           def send(addr,tos,ipv6=False):
               s=socket.socket(socket.AF_INET6 if ipv6 else socket.AF_INET,socket.SOCK_DGRAM)
               s.setsockopt(socket.IPPROTO_IPV6 if ipv6 else socket.IPPROTO_IP,socket.IPV6_TCLASS if ipv6 else socket.IP_TOS,tos)
