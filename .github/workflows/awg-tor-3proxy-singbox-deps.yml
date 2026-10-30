@@ -1,0 +1,54 @@
+name: AWG Manager Tor 3proxy sing-box offline runtime (Debian 13 amd64)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-tor-3proxy-singbox-deps.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Download Debian 13 Tor and runtime dependencies
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$PWD/out/debs"
+          docker run --rm -v "$PWD/out/debs:/out" debian:13-slim bash -euc '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --download-only --no-install-recommends tor tor-geoipdb ca-certificates curl libssl3t64 libpcre2-8-0
+            cp -v /var/cache/apt/archives/*.deb /out/
+          '
+      - name: Download and verify upstream sing-box and 3proxy
+        run: |
+          set -Eeuo pipefail
+          mkdir -p out/upstream
+          cd out/upstream
+          curl -fsSL --retry 3 -o sing-box-1.14.4-linux-amd64.tar.gz \
+            https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz
+          printf '%s  %s\n' \
+            699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968 \
+            sing-box-1.14.4-linux-amd64.tar.gz | sha256sum -c -
+          curl -fsSL --retry 3 -o 3proxy-0.9.9.2.x86_64.deb \
+            https://github.com/3proxy/3proxy/releases/download/0.9.9.2/3proxy-0.9.9.2.x86_64.deb
+          printf '%s  %s\n' \
+            4f6d516884f13cd5d2e8ebd4f5177cc5508f7b442bebeada8c4f34a9ed0ab5d0 \
+            3proxy-0.9.9.2.x86_64.deb | sha256sum -c -
+          tar -tzf sing-box-1.14.4-linux-amd64.tar.gz | head -30
+          dpkg-deb -I 3proxy-0.9.9.2.x86_64.deb | head -35
+      - name: Manifest and sizes
+        run: |
+          set -Eeuo pipefail
+          (cd out && find debs upstream -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          du -ah out | sort -h | tail -12
+      - name: Upload verified offline runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: awg-tor-3proxy-singbox-debian13-amd64
+          path: out/
+          compression-level: 0
+          retention-days: 30
