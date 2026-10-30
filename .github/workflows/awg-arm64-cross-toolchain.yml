@@ -1,0 +1,51 @@
+name: AWG Manager ARM64 cross compiler (Debian 13 target)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-arm64-cross-toolchain.yml
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Prepare isolated Debian 13 cross toolchain and SQLite ARM64 development libraries
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$PWD/out"
+          docker run --rm -v "$PWD/out:/out" debian:13 bash -euc '
+            export DEBIAN_FRONTEND=noninteractive
+            dpkg --add-architecture arm64
+            apt-get update
+            apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross libsqlite3-dev:arm64
+            aarch64-linux-gnu-gcc --version | head -1
+            test -f /usr/include/sqlite3.h
+            find /usr/lib/aarch64-linux-gnu -name "libsqlite3.so*" -print
+            # Pack the non-host compiler, its sysroot and arm64 SQLite together.
+            tar -C / --ignore-failed-read -czf /out/debian13-aarch64-cross-sqlite.tar.gz \
+              usr/bin/aarch64-linux-gnu-gcc \
+              usr/bin/aarch64-linux-gnu-gcc-14 \
+              usr/bin/aarch64-linux-gnu-as \
+              usr/bin/aarch64-linux-gnu-ld \
+              usr/bin/aarch64-linux-gnu-ar \
+              usr/bin/aarch64-linux-gnu-ranlib \
+              usr/bin/aarch64-linux-gnu-nm \
+              usr/bin/aarch64-linux-gnu-objcopy \
+              usr/bin/aarch64-linux-gnu-strip \
+              usr/bin/aarch64-linux-gnu-readelf \
+              usr/lib/gcc-cross/aarch64-linux-gnu \
+              usr/aarch64-linux-gnu \
+              usr/lib/aarch64-linux-gnu \
+              usr/include/sqlite3.h \
+              usr/include/sqlite3ext.h
+            (cd /out && sha256sum debian13-aarch64-cross-sqlite.tar.gz > SHA256SUMS)
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-debian13-arm64-cross-sqlite
+          path: out/
+          compression-level: 0
+          retention-days: 30
