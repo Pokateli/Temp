@@ -62,7 +62,7 @@ jobs:
               for part in re.split(r'(?=^class htb )',output,flags=re.M):
                   m=re.search(r'^class htb ([0-9a-fA-F]+:[0-9a-fA-F]+)',part)
                   if not m: continue
-                  sent=re.search(r'Sent\\s+(\\d+)\\s+bytes',part)
+                  sent=re.search(r'Sent\s+(\d+)\s+bytes',part)
                   result[m.group(1).lower()]=int(sent.group(1)) if sent else 0
               print('TC_CLASS_STATS',result)
               assert '1:5003' in result and '1:5000' in result and '1:5004' in result, output
