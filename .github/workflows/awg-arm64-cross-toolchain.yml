@@ -41,6 +41,7 @@ jobs:
               usr/libexec/gcc-cross/aarch64-linux-gnu \
               usr/lib/x86_64-linux-gnu/libopcodes-2.44-arm64.so \
               usr/lib/x86_64-linux-gnu/libbfd-2.44-arm64.so \
+              usr/lib/x86_64-linux-gnu/libctf-arm64.so.0 \
               usr/aarch64-linux-gnu \
               usr/lib/aarch64-linux-gnu \
               usr/include/sqlite3.h \
