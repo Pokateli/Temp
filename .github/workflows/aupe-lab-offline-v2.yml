@@ -1,0 +1,60 @@
+name: AUPE lab offline upstream source and Go dependencies
+on:
+  push:
+    paths:
+      - .github/workflows/aupe-lab-offline-v2.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout pinned upstream AmneziaWG-Go
+        uses: actions/checkout@v4
+        with:
+          repository: amnezia-vpn/amneziawg-go
+          ref: b5928efb6ca19f0153958460c3d141f04abc5c2e
+          fetch-depth: 1
+          path: upstream
+          persist-credentials: false
+      - name: Verify pinned upstream
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C upstream rev-parse HEAD)" = b5928efb6ca19f0153958460c3d141f04abc5c2e
+          test -f upstream/device/timers.go
+          test -f upstream/device/receive.go
+          test -f upstream/device/send.go
+          git -C upstream status --short
+      - name: Install upstream Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.0'
+          check-latest: false
+          cache: false
+      - name: Fetch offline module cache and make transport artifacts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export GOTOOLCHAIN=local
+          test "$(go version | awk '{print $3}')" = go1.25.0
+          cd upstream
+          go mod download
+          cd ..
+          mkdir -p output
+          tar -C upstream -czf output/upstream-git.tar.gz .
+          tar -C "$(go env GOROOT)" -czf output/go1.25.0-linux-amd64.tar.gz .
+          tar -C "$(go env GOMODCACHE)" -czf output/gomodcache.tar.gz .
+          printf '%s\n' 'b5928efb6ca19f0153958460c3d141f04abc5c2e' > output/UPSTREAM_COMMIT
+          (cd output && sha256sum *.tar.gz > SHA256SUMS.txt)
+          cat output/SHA256SUMS.txt
+          du -h output/*
+      - name: Upload verified AUPE build prerequisites
+        uses: actions/upload-artifact@v4
+        with:
+          name: aupe-noise-v2-offline-prerequisites
+          path: output/
+          compression-level: 0
+          retention-days: 14
