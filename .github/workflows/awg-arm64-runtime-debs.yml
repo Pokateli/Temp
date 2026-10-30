@@ -16,12 +16,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p "$PWD/arm-debs"
-          docker run --rm -v "$PWD/arm-debs:/out" debian:13-slim bash -euc '
+          docker run --privileged --rm tonistiigi/binfmt --install arm64
+          docker run --platform linux/arm64 --rm -v "$PWD/arm-debs:/out" debian:13-slim bash -euc '
             export DEBIAN_FRONTEND=noninteractive
-            dpkg --add-architecture arm64
             apt-get update
-            apt-get -o APT::Architecture=arm64 -y --download-only install \
-              gnupg:arm64 lftp:arm64 nftables:arm64 qrencode:arm64 unzip:arm64 zip:arm64
+            apt-get -y --download-only install \
+              gnupg lftp nftables qrencode unzip zip
             cp -v /var/cache/apt/archives/*.deb /out/
             (cd /out && sha256sum *.deb > SHA256SUMS)
           '
