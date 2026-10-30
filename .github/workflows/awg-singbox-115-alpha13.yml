@@ -1,0 +1,33 @@
+name: AWG sing-box 1.15 alpha13 experimental runtime
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-singbox-115-alpha13.yml
+permissions:
+  contents: read
+jobs:
+  fetch-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download checksum-pinned experimental sing-box
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p out
+          cd out
+          curl -fLSs --retry 3 -o sing-box-1.15.0-alpha.13-linux-amd64.tar.gz \
+            https://github.com/SagerNet/sing-box/releases/download/v1.15.0-alpha.13/sing-box-1.15.0-alpha.13-linux-amd64.tar.gz
+          printf '%s  %s\n' \
+            bfc39f643a5ecc1b702c5723ff662e61dde813f12b3af0d0cfce4f629ff74047 \
+            sing-box-1.15.0-alpha.13-linux-amd64.tar.gz | sha256sum -c -
+          tar -xzf sing-box-1.15.0-alpha.13-linux-amd64.tar.gz
+          find . -type f -name sing-box -exec {} version \;
+          sha256sum sing-box-1.15.0-alpha.13-linux-amd64.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awg-singbox-115-alpha13-amd64
+          path: out/
+          compression-level: 0
+          retention-days: 30
