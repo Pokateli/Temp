@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Control a LOCAL running Tiny11 QEMU VM using its loopback-only HMP monitor.
 
-Available commands: status, screenshot, powerdown. No network or guest data upload.
+Available commands: status, screenshot, wake, powerdown, sendkey. No network or guest data upload.
 This controls a running QEMU process, NOT GitHub Actions and not a remote computer.
 The ready QCOW2 remains immutable; launch sessions use their own QCOW2 overlay.
 """
 import argparse
+import re
 from pathlib import Path
 import socket
 import sys
@@ -35,11 +36,12 @@ def talk(address: Path, command: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("status", "screenshot", "powerdown"))
+    parser.add_argument("action", choices=("status", "screenshot", "wake", "powerdown", "sendkey"))
     parser.add_argument("--vm-dir", type=Path, default=Path("/mnt/data/tiny11-ready"))
     parser.add_argument("--monitor", type=Path,
                         help="Unix monitor path, otherwise use VM directory qemu-monitor.sock")
     parser.add_argument("--output", type=Path, help="PNG/PPM screenshot output")
+    parser.add_argument("--keys", help="QEMU key combination, e.g. ctrl-esc or meta_l-r")
     args = parser.parse_args()
     root = args.vm_dir.resolve()
     addr = (args.monitor or root / "qemu-monitor.sock").resolve()
@@ -47,9 +49,19 @@ def main() -> None:
         print(talk(addr, "info status"))
         print(talk(addr, "info kvm"))
         return
+    if args.action == "wake":
+        print(talk(addr, "system_wakeup"))
+        print("Wake request sent; verify with 'status'.")
+        return
     if args.action == "powerdown":
         print(talk(addr, "system_powerdown"))
         print("ACPI shutdown requested (not yet confirmed).")
+        return
+    if args.action == "sendkey":
+        # Fixed key-name alphabet prevents injecting additional HMP commands.
+        if not args.keys or not re.fullmatch(r"[A-Za-z0-9_+.-]{1,128}",args.keys):
+            parser.error("--keys must contain a valid QEMU key combination")
+        print(talk(addr, "sendkey "+args.keys))
         return
     output = (args.output or root / "tiny11-desktop.png").resolve()
     if output.suffix.lower() not in (".png", ".ppm"):
