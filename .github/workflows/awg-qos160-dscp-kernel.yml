@@ -1,0 +1,85 @@
+name: AWG 0.9.160 trusted DSCP EF Linux kernel smoke
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/awg-qos160-dscp-kernel.yml
+permissions:
+  contents: read
+jobs:
+  kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Real HTB and flower IPv4/IPv6 packet counters
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo bash <<'SH'
+          set -Eeuo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          command -v ip
+          command -v tc
+          ip netns add awg160peer
+          trap 'ip link del awg160v0 2>/dev/null || true; ip netns del awg160peer 2>/dev/null || true' EXIT
+          ip link add awg160v0 type veth peer name awg160v1
+          ip link set awg160v1 netns awg160peer
+          ip addr add 10.7.0.1/24 dev awg160v0
+          ip -6 addr add fd00:7::1/64 dev awg160v0
+          ip netns exec awg160peer ip addr add 10.7.0.2/24 dev awg160v1
+          ip netns exec awg160peer ip addr add 10.7.0.3/32 dev awg160v1
+          ip netns exec awg160peer ip -6 addr add fd00:7::2/64 dev awg160v1
+          ip link set awg160v0 up
+          ip netns exec awg160peer ip link set lo up
+          ip netns exec awg160peer ip link set awg160v1 up
+          tc qdisc replace dev awg160v0 root handle 1: htb default 30
+          tc class replace dev awg160v0 parent 1: classid 1:1 htb rate 20mbit ceil 20mbit
+          tc class replace dev awg160v0 parent 1:1 classid 1:1000 htb rate 10mbit ceil 10mbit
+          tc class replace dev awg160v0 parent 1:1000 classid 1:5000 htb rate 9mbit ceil 10mbit prio 5
+          tc class replace dev awg160v0 parent 1:1000 classid 1:5003 htb rate 1mbit ceil 2500kbit prio 2
+          tc class replace dev awg160v0 parent 1:1 classid 1:1001 htb rate 10mbit ceil 10mbit
+          tc class replace dev awg160v0 parent 1:1001 classid 1:5004 htb rate 10mbit ceil 10mbit
+          tc qdisc replace dev awg160v0 parent 1:5000 fq_codel
+          tc qdisc replace dev awg160v0 parent 1:5003 fq_codel
+          tc qdisc replace dev awg160v0 parent 1:5004 fq_codel
+          tc filter replace dev awg160v0 protocol ip parent 1: prio 100 flower dst_ip 10.7.0.2/32 ip_proto udp ip_tos 0xb8/0xfc classid 1:5003
+          tc filter replace dev awg160v0 protocol ipv6 parent 1: prio 101 flower dst_ip fd00:7::2/128 ip_proto udp ip_tos 0xb8/0xfc classid 1:5003
+          tc filter replace dev awg160v0 protocol ip parent 1: prio 10000 flower dst_ip 10.7.0.2/32 classid 1:5000
+          tc filter replace dev awg160v0 protocol ip parent 1: prio 10001 flower dst_ip 10.7.0.3/32 classid 1:5004
+          tc filter replace dev awg160v0 protocol ipv6 parent 1: prio 10002 flower dst_ip fd00:7::2/128 classid 1:5000
+          python3 - <<'PY'
+          import json,socket,subprocess,time
+          def counters():
+              records=json.loads(subprocess.check_output(['tc','-j','-s','class','show','dev','awg160v0'],text=True))
+              return {str(x.get('handle') or x.get('classid')):int(x.get('bytes',x.get('stats',{}).get('bytes',0))) for x in records}
+          def send(addr,tos,ipv6=False):
+              s=socket.socket(socket.AF_INET6 if ipv6 else socket.AF_INET,socket.SOCK_DGRAM)
+              s.setsockopt(socket.IPPROTO_IPV6 if ipv6 else socket.IPPROTO_IP,socket.IPV6_TCLASS if ipv6 else socket.IP_TOS,tos)
+              for n in range(48):s.sendto(b'test-qos-160'+bytes([n]),(addr,24000))
+              s.close()
+              time.sleep(.35)
+              return counters()
+          def delta(a,b,key):return b.get(key,0)-a.get(key,0)
+          initial=counters()
+          alice=send('10.7.0.2',0xb9)
+          bob=send('10.7.0.3',0xb8)
+          plain=send('10.7.0.2',0)
+          ipv6=send('fd00:7::2',0xbb,True)
+          results={
+              'trusted_ipv4_voice':delta(initial,alice,'1:5003'),
+              'untrusted_voice_leak':delta(alice,bob,'1:5003'),
+              'untrusted_normal':delta(alice,bob,'1:5004'),
+              'trusted_normal':delta(bob,plain,'1:5000'),
+              'trusted_ipv6_voice':delta(plain,ipv6,'1:5003'),
+              'trusted_parent_total':delta(initial,ipv6,'1:1000'),
+          }
+          print('QOS160_COUNTERS',json.dumps(results,sort_keys=True))
+          assert results['trusted_ipv4_voice']>0
+          assert results['untrusted_voice_leak']==0
+          assert results['untrusted_normal']>0
+          assert results['trusted_normal']>0
+          assert results['trusted_ipv6_voice']>0
+          assert results['trusted_parent_total']>0
+          print('QOS160_KERNEL_PASS')
+          PY
+          SH
