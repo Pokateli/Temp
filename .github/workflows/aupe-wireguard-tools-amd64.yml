@@ -1,0 +1,42 @@
+name: AUPE lab transport Debian amd64 wireguard-tools
+on:
+  push:
+    paths:
+      - .github/workflows/aupe-wireguard-tools-amd64.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deps:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Fetch pinned Debian 13 wireguard tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p output
+          cd output
+          curl -fL --retry 3 -o Packages.xz https://deb.debian.org/debian/dists/trixie/main/binary-amd64/Packages.xz
+          python3 - <<'PY'
+          import lzma,re
+          data=lzma.open('Packages.xz','rt',errors='replace').read()
+          p=next(x for x in data.split('\n\n') if x.startswith('Package: wireguard-tools\n'))
+          for k in ('Version','Filename','SHA256'):
+              print(k, re.search('^'+k+': (.+)$',p,re.M).group(1))
+          with open('package-info.txt','w') as f:f.write(p+'\n')
+          PY
+          path=$(sed -n 's/^Filename: //p' package-info.txt)
+          sha=$(sed -n 's/^SHA256: //p' package-info.txt)
+          curl -fL --retry 3 -o wireguard-tools-amd64.deb "https://deb.debian.org/debian/$path"
+          printf '%s  %s\n' "$sha" wireguard-tools-amd64.deb | sha256sum -c -
+          dpkg-deb -f wireguard-tools-amd64.deb Package Architecture Version
+          sha256sum wireguard-tools-amd64.deb > SHA256SUMS.txt
+          rm Packages.xz
+      - name: Upload package for local offline VM
+        uses: actions/upload-artifact@v4
+        with:
+          name: aupe-wireguard-tools-debian13-amd64
+          path: output/
+          compression-level: 0
+          retention-days: 14
