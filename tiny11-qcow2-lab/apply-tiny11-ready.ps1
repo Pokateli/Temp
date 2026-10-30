@@ -139,6 +139,9 @@ try {
 setlocal EnableExtensions
 if not exist "%SystemRoot%\Temp" mkdir "%SystemRoot%\Temp"
 echo TINY11_SECOND_BOOT_STARTED>"%SystemRoot%\Temp\Tiny11BootProbe.log"
+rem Enforce no S3 idle suspend across reused interactive QEMU sessions.
+powercfg.exe /change standby-timeout-ac 0 >>"%SystemRoot%\Temp\Tiny11BootProbe.log" 2>&1
+powercfg.exe /change standby-timeout-dc 0 >>"%SystemRoot%\Temp\Tiny11BootProbe.log" 2>&1
 for /L %%N in (1,1,40) do (
  for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
   if exist %%D:\TINY11_PROBE.TXT (
@@ -169,6 +172,12 @@ echo PREPARING_WINDOWS_READY_DISK>"%SystemRoot%\Temp\Tiny11FirstReady.log"
 schtasks.exe /Create /F /SC ONSTART /RU SYSTEM /TN "Tiny11-Ready-Probe" /TR "C:\Windows\Setup\Scripts\Tiny11BootProbe.cmd" >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
 if errorlevel 1 exit /b 1
 powercfg.exe /h off >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
+rem QEMU TCG guests without interactive input can enter ACPI S3 after idle;
+rem disable AC/DC standby and monitor timeout in the finalized VM image.
+powercfg.exe /change standby-timeout-ac 0 >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
+powercfg.exe /change standby-timeout-dc 0 >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
+powercfg.exe /change monitor-timeout-ac 0 >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
+powercfg.exe /change monitor-timeout-dc 0 >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SystemRoot%\Setup\Scripts\Tiny11SerialProof.ps1" -Event FirstReady >>"%SystemRoot%\Temp\Tiny11FirstReady.log" 2>&1
 for %%D in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
  if exist %%D:\TINY11_PROBE.TXT (
