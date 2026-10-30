@@ -1,0 +1,53 @@
+diff --git a/device/receive.go b/device/receive.go
+index d1901f8..ba53233 100644
+--- a/device/receive.go
++++ b/device/receive.go
+@@ -472,6 +472,7 @@ func (device *Device) RoutineHandshake(id int) {
+ 
+ 			peer.timersSessionDerived()
+ 			peer.timersHandshakeComplete()
++			peer.emitConfirmedNoiseEvent()
+ 			peer.SendKeepalive()
+ 		}
+ 	skip:
+diff --git a/device/send.go b/device/send.go
+index 2b0a475..d4f5e49 100644
+--- a/device/send.go
++++ b/device/send.go
+@@ -333,6 +333,24 @@ func (device *Device) RoutineReadFromTUN() {
+ 
+ 		// read packets
+ 		count, readErr = device.tun.device.Read(bufs, sizes, offset)
++		// S4 can change while Read blocks. Packet bytes used the old offset.
++		currentPadding := device.paddings.transport.Load()
++		if currentPadding != padding {
++			newOffset := MessageTransportHeaderSize + int(currentPadding)
++			for i := 0; i < count; i++ {
++				if sizes[i] < 1 {
++					continue
++				}
++				if newOffset+sizes[i] > len(bufs[i]) {
++					// Never submit a truncated or misframed packet.
++					sizes[i] = 0
++					continue
++				}
++				copy(bufs[i][newOffset:newOffset+sizes[i]], bufs[i][offset:offset+sizes[i]])
++			}
++			padding = currentPadding
++			offset = newOffset
++		}
+ 		for i := 0; i < count; i++ {
+ 			if sizes[i] < 1 {
+ 				continue
+diff --git a/device/timers.go b/device/timers.go
+index 4a5499d..3470b5a 100644
+--- a/device/timers.go
++++ b/device/timers.go
+@@ -100,6 +100,7 @@ func expiredRetransmitHandshake(peer *Peer, d time.Duration) {
+ 		}
+ 	} else {
+ 		peer.timers.handshakeAttempts.Add(1)
++		peer.emitNoiseEvent("timeout", 0)
+ 		peer.device.log.Verbosef("%s - Handshake did not complete after %d seconds, retrying (try %d)", peer, int(d.Seconds()), peer.timers.handshakeAttempts.Load()+1)
+ 
+ 		/* We clear the endpoint address src address, in case this is the cause of trouble. */
