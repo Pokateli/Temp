@@ -5,7 +5,6 @@ on:
     paths:
       - .github/workflows/archive-actions-artifacts.yml
   workflow_dispatch:
-  schedule:
 
 permissions:
   actions: write
