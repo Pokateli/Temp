@@ -1,0 +1,145 @@
+name: Archive Actions artifacts to Releases
+
+on:
+  push:
+    paths:
+      - .github/workflows/archive-actions-artifacts.yml
+  workflow_run:
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: actions-artifact-release-archive-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.workflow_run.name != 'Archive Actions artifacts to Releases' &&
+       github.event.workflow_run.event != 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
+      WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || '' }}
+    steps:
+      - name: Move retained workflow artifacts to monthly GitHub Releases
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          MONTH="$(date -u +%Y-%m)"
+          TAG="actions-artifacts-archive-${MONTH}"
+          MAX_ASSET_BYTES=2147483647
+          ARCHIVE_DIR="$RUNNER_TEMP/actions-artifact-archive"
+          mkdir -p "$ARCHIVE_DIR"
+
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            [[ -n "$WORKFLOW_RUN_ID" ]]
+            ROWS="$(gh api --paginate \
+              "repos/$GH_REPO/actions/runs/$WORKFLOW_RUN_ID/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired == false) | [.id, .name, .size_in_bytes, .workflow_run.id] | @tsv')"
+          else
+            ROWS="$(gh api --paginate \
+              "repos/$GH_REPO/actions/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired == false) | [.id, .name, .size_in_bytes, .workflow_run.id] | @tsv')"
+          fi
+
+          if [[ -z "$ROWS" ]]; then
+            echo "No active Actions artifacts to archive."
+            exit 0
+          fi
+
+          if ! gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GH_REPO" \
+              --title "Actions artifacts archive $MONTH" \
+              --notes "Automatically archived GitHub Actions artifacts. Each asset is the original Actions artifact ZIP; matching SHA256 sidecars are included. Original Actions artifacts are deleted only after release asset size verification."
+          fi
+
+          declare -A RUN_ALLOWED=()
+          ARCHIVED=0
+          SKIPPED=0
+
+          while IFS=$'\t' read -r ARTIFACT_ID ARTIFACT_NAME ARTIFACT_SIZE RUN_ID; do
+            [[ -n "${ARTIFACT_ID:-}" ]] || continue
+
+            if [[ -z "${RUN_ALLOWED[$RUN_ID]+x}" ]]; then
+              if ! RUN_META="$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID" --jq '[.event, .head_repository.full_name] | @tsv')"; then
+                RUN_ALLOWED[$RUN_ID]=0
+              elif [[ "$RUN_META" == $'pull_request\t'* || "$RUN_META" != *$'\t'"$GH_REPO" ]]; then
+                RUN_ALLOWED[$RUN_ID]=0
+              else
+                RUN_ALLOWED[$RUN_ID]=1
+              fi
+            fi
+
+            if [[ "${RUN_ALLOWED[$RUN_ID]}" != "1" ]]; then
+              echo "Skipping artifact $ARTIFACT_ID from an untrusted or pull-request run."
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            if (( ARTIFACT_SIZE >= MAX_ASSET_BYTES )); then
+              echo "Skipping artifact $ARTIFACT_ID ($ARTIFACT_NAME): exceeds GitHub's per-release-asset size limit."
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+
+            SAFE_NAME="$(printf '%s' "$ARTIFACT_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | cut -c1-80)"
+            ASSET_NAME="run-${RUN_ID}-artifact-${ARTIFACT_ID}-${SAFE_NAME}.zip"
+            ARCHIVE="$ARCHIVE_DIR/$ASSET_NAME"
+            CHECKSUM="$ARCHIVE_DIR/${ASSET_NAME}.sha256"
+
+            echo "::group::Archive $ARTIFACT_NAME (run $RUN_ID, artifact $ARTIFACT_ID)"
+            curl --fail --location --silent --show-error \
+              --retry 4 --retry-delay 2 \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID/zip" \
+              --output "$ARCHIVE"
+
+            ACTUAL_SIZE="$(stat -c '%s' "$ARCHIVE")"
+            if [[ "$ACTUAL_SIZE" != "$ARTIFACT_SIZE" ]]; then
+              echo "Size mismatch: API=$ARTIFACT_SIZE downloaded=$ACTUAL_SIZE. Keeping original artifact."
+              rm -f "$ARCHIVE"
+              SKIPPED=$((SKIPPED + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            HASH="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+            printf '%s  %s\n' "$HASH" "$ASSET_NAME" > "$CHECKSUM"
+            CHECKSUM_SIZE="$(stat -c '%s' "$CHECKSUM")"
+
+            gh release upload "$TAG" "$ARCHIVE" "$CHECKSUM" --repo "$GH_REPO" --clobber
+
+            ASSETS="$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq '.assets[] | [.name, (.size | tostring)] | @tsv')"
+            grep -Fqx -- "$(printf '%s\t%s' "$ASSET_NAME" "$ACTUAL_SIZE")" <<< "$ASSETS"
+            grep -Fqx -- "$(printf '%s\t%s' "${ASSET_NAME}.sha256" "$CHECKSUM_SIZE")" <<< "$ASSETS"
+
+            # Delete the source only after both release assets are confirmed.
+            gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID" >/dev/null
+
+            echo "Archived and verified: $ASSET_NAME ($ACTUAL_SIZE bytes, SHA256 $HASH); source artifact deleted."
+            ARCHIVED=$((ARCHIVED + 1))
+            rm -f "$ARCHIVE" "$CHECKSUM"
+            echo "::endgroup::"
+          done <<< "$ROWS"
+
+          {
+            echo "## Actions artifact archive"
+            echo "- Repository: $GH_REPO"
+            echo "- Release: $TAG"
+            echo "- Archived and verified: $ARCHIVED"
+            echo "- Skipped / retained: $SKIPPED"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Completed: archived=$ARCHIVED skipped=$SKIPPED release=$TAG"
