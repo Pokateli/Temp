@@ -200,12 +200,18 @@ jobs:
           set -Eeuo pipefail
 
           MONTH="$(date -u +%Y-%m)"
-          TAG="actions-logs-archive-\${MONTH}"
+          TAG="actions-logs-archive-${MONTH}"
+          BAD_TAG='actions-logs-archive-${MONTH}'
           MAX_ASSET_BYTES=2147483647
           MAX_BATCH_BYTES=1700000000
           WORK_DIR="$RUNNER_TEMP/actions-log-archive"
           BATCH_DIR="$WORK_DIR/batch"
           mkdir -p "$WORK_DIR" "$BATCH_DIR"
+
+          # Remove the empty tag created by the previous quoting bug, if present.
+          if gh release view "$BAD_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release delete "$BAD_TAG" --repo "$GH_REPO" --yes --cleanup-tag
+          fi
 
           RUN_ROWS="$(gh api --paginate \
             "repos/$GH_REPO/actions/runs?per_page=100" \
@@ -225,6 +231,7 @@ jobs:
 
           BATCH_COUNT=0
           BATCH_BYTES=0
+          BATCH_ATTEMPTS=0
           BATCH_FIRST=""
           BATCH_LAST=""
           ARCHIVED_RUNS=0
@@ -239,10 +246,10 @@ jobs:
               return 0
             fi
 
-            local bundle_name="logs-\${MONTH}-runs-\${BATCH_FIRST}-\${BATCH_LAST}.zip"
+            local bundle_name="logs-${MONTH}-runs-${BATCH_FIRST}-${BATCH_LAST}.zip"
             local bundle="$WORK_DIR/$bundle_name"
-            local checksum="$WORK_DIR/\${bundle_name}.sha256"
-            local bundle_size hash remote_meta remote_size remote_digest checksum_meta
+            local checksum="$WORK_DIR/${bundle_name}.sha256"
+            local bundle_size hash remote_json remote_meta remote_size remote_digest checksum_meta
 
             (cd "$WORK_DIR" && zip -qr "$bundle" batch)
             bundle_size="$(stat -c '%s' "$bundle")"
@@ -253,17 +260,14 @@ jobs:
 
             hash="$(sha256sum "$bundle" | awk '{print $1}')"
             printf '%s  %s\n' "$hash" "$bundle_name" > "$checksum"
-
             gh release upload "$TAG" "$bundle" "$checksum" --repo "$GH_REPO" --clobber
 
-            remote_meta="$(gh api "repos/$GH_REPO/releases/tags/$TAG" \
-              --jq --arg name "$bundle_name" \
-              '.assets[] | select(.name == $name) | [.size, .digest] | @tsv')"
+            remote_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG")"
+            remote_meta="$(jq -r --arg name "$bundle_name" \
+              '.assets[] | select(.name == $name) | [.size, .digest] | @tsv' <<< "$remote_json")"
             IFS=$'\t' read -r remote_size remote_digest <<< "$remote_meta"
-
-            checksum_meta="$(gh api "repos/$GH_REPO/releases/tags/$TAG" \
-              --jq --arg name "\${bundle_name}.sha256" \
-              '.assets[] | select(.name == $name) | [.size, .digest] | @tsv')"
+            checksum_meta="$(jq -r --arg name "${bundle_name}.sha256" \
+              '.assets[] | select(.name == $name) | [.size, .digest] | @tsv' <<< "$remote_json")"
 
             if [[ "$remote_size" != "$bundle_size" ||
                   "$remote_digest" != "sha256:$hash" ||
@@ -274,28 +278,30 @@ jobs:
 
             echo "Release bundle verified: $bundle_name ($bundle_size bytes, SHA256 $hash)."
 
-            for run_id in "\${BATCH_RUN_IDS[@]}"; do
+            for run_id in "${BATCH_RUN_IDS[@]}"; do
               gh api --method DELETE "repos/$GH_REPO/actions/runs/$run_id/logs" >/dev/null
               DELETED_RUNS=$((DELETED_RUNS + 1))
               echo "Deleted original logs for workflow run $run_id after verified archive."
             done
 
             ARCHIVED_RUNS=$((ARCHIVED_RUNS + BATCH_COUNT))
+            ARCHIVED_ATTEMPTS=$((ARCHIVED_ATTEMPTS + BATCH_ATTEMPTS))
             rm -f "$bundle" "$checksum"
             rm -rf "$BATCH_DIR"
             mkdir -p "$BATCH_DIR"
             : > "$BATCH_DIR/manifest.tsv"
             BATCH_COUNT=0
             BATCH_BYTES=0
+            BATCH_ATTEMPTS=0
             BATCH_FIRST=""
             BATCH_LAST=""
             BATCH_RUN_IDS=()
           }
 
           while IFS=$'\t' read -r RUN_ID RUN_ATTEMPT CREATED_AT; do
-            [[ -n "\${RUN_ID:-}" ]] || continue
+            [[ -n "${RUN_ID:-}" ]] || continue
 
-            # The current workflow is still running, so its logs are archived on a later manual run.
+            # The current workflow is still running; its logs remain for the next manual run.
             if [[ "$RUN_ID" == "$GITHUB_RUN_ID" ]]; then
               continue
             fi
@@ -330,17 +336,15 @@ jobs:
               fi
 
               if [[ "$HTTP_STATUS" != "302" && "$HTTP_STATUS" != "301" ]]; then
-                echo "Unexpected HTTP $HTTP_STATUS for run $RUN_ID attempt $ATTEMPT; retaining the run's logs."
-                RUN_OK=0
-                break
+                echo "Unexpected HTTP $HTTP_STATUS for run $RUN_ID attempt $ATTEMPT; stopping without deleting logs."
+                exit 1
               fi
 
               DOWNLOAD_URL="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print }' "$HEADERS" | tail -n 1)"
               rm -f "$HEADERS"
               if [[ -z "$DOWNLOAD_URL" ]]; then
-                echo "Missing signed URL for run $RUN_ID attempt $ATTEMPT; retaining the run's logs."
-                RUN_OK=0
-                break
+                echo "Missing signed URL for run $RUN_ID attempt $ATTEMPT; stopping without deleting logs."
+                exit 1
               fi
 
               curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
@@ -360,7 +364,7 @@ jobs:
               fi
 
               ATTEMPT_HASH="$(sha256sum "$DOWNLOAD" | awk '{print $1}')"
-              ATTEMPT_NAME="run-\${RUN_ID}-attempt-\${ATTEMPT}-logs.zip"
+              ATTEMPT_NAME="run-${RUN_ID}-attempt-${ATTEMPT}-logs.zip"
               mv "$DOWNLOAD" "$RUN_TMP/$ATTEMPT_NAME"
               printf '%s\t%s\t%s\t%s\t%s\n' \
                 "$RUN_ID" "$ATTEMPT" "$CREATED_AT" "$ATTEMPT_NAME" "$ATTEMPT_HASH" \
@@ -400,7 +404,7 @@ jobs:
             BATCH_RUN_IDS+=("$RUN_ID")
             BATCH_COUNT=$((BATCH_COUNT + 1))
             BATCH_BYTES=$((BATCH_BYTES + RUN_BYTES))
-            ARCHIVED_ATTEMPTS=$((ARCHIVED_ATTEMPTS + RUN_ATTEMPT_COUNT))
+            BATCH_ATTEMPTS=$((BATCH_ATTEMPTS + RUN_ATTEMPT_COUNT))
           done <<< "$RUN_ROWS"
 
           flush_batch
