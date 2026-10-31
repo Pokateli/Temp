@@ -20,7 +20,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq p7zip-full util-linux binutils unzip e2fsprogs > /dev/null
+          sudo apt-get install -y -qq p7zip-full util-linux binutils unzip e2fsprogs zstd > /dev/null
           mkdir -p "$RUNNER_TEMP/forensic"
           cd "$RUNNER_TEMP/forensic"
           for n in 001 002; do
@@ -35,7 +35,11 @@ jobs:
           FILE=$(unzip -Z1 joined.zip | grep -Ei '\.(img|raw|dd|bin)$' | head -1 || :)
           if [ -z "$FILE" ]; then FILE=$(unzip -Z1 joined.zip | head -1); fi
           echo "Image member: $FILE"
-          unzip -p joined.zip "$FILE" | dd of=miner.img bs=8M conv=sparse status=none
+          echo 'Nested compressed member details:'
+          unzip -p joined.zip "$FILE" | zstd -lv - || true
+          unzip -p joined.zip "$FILE" | zstd -dc | dd of=miner.img bs=8M conv=sparse status=none
+          file miner.img
+          df -h .
           rm -f joined.zip
           echo "Raw image: $(du -h miner.img); logical: $(stat -c %s miner.img)"
           sudo losetup -fP --read-only --show miner.img > loopdev.txt
