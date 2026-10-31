@@ -1,0 +1,60 @@
+name: TEMP1 USB PWM fan controller forensic audit
+on:
+  push:
+    branches:
+      - analysis/fan-usb-pwm-temp1-20261031
+    paths:
+      - .github/workflows/fan-audit-temp1.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and examine miner disk read-only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full util-linux binutils unzip e2fsprogs > /dev/null
+          mkdir -p /mnt/forensic
+          cd /mnt/forensic
+          for n in 001 002; do
+            echo "Downloading part $n"
+            curl -fL --retry 4 --retry-delay 5 --connect-timeout 30 --max-time 2400 -H "Authorization: Bearer $GH_TOKEN" -o "sdf.img.zip.$n" "https://github.com/Pokateli/Temp/releases/download/Temp_1/sdf.img.zip.$n"
+          done
+          echo '5f42ec683fea1ee4053886ca36fdb010b365d9bdd7779e51c92f2679711e95bd  sdf.img.zip.001' | sha256sum -c -
+          echo '13e6d0e5c649d7e49752a8a460686a959cf4330977378833804af7af2bdd383e  sdf.img.zip.002' | sha256sum -c -
+          cat sdf.img.zip.001 sdf.img.zip.002 > joined.zip
+          rm sdf.img.zip.001 sdf.img.zip.002
+          unzip -Z1 joined.zip | head -30
+          FILE=$(unzip -Z1 joined.zip | grep -Ei '\.(img|raw|dd|bin)$' | head -1 || :)
+          if [ -z "$FILE" ]; then FILE=$(unzip -Z1 joined.zip | head -1); fi
+          echo "Image member: $FILE"
+          unzip -p joined.zip "$FILE" | dd of=miner.img bs=8M conv=sparse status=none
+          rm -f joined.zip
+          echo "Raw image: $(du -h miner.img); logical: $(stat -c %s miner.img)"
+          sudo losetup -fP --read-only --show miner.img > loopdev.txt
+          LOOP=$(cat loopdev.txt)
+          lsblk -o NAME,PATH,SIZE,FSTYPE,LABEL "$LOOP"
+          sudo mkdir -p /mnt/miner-ro
+          ROOT=''
+          while read -r DEV; do
+            [ -b "$DEV" ] || continue
+            if sudo mount -o ro,noload "$DEV" /mnt/miner-ro 2>/dev/null || sudo mount -o ro "$DEV" /mnt/miner-ro 2>/dev/null; then
+              if [ -e /mnt/miner-ro/etc/os-release ]; then ROOT=/mnt/miner-ro; echo "Linux root on $DEV"; break; fi
+              sudo umount /mnt/miner-ro
+            fi
+          done < <(lsblk -rno PATH "$LOOP" | tail -n +2)
+          if [ -z "$ROOT" ]; then echo "NO_ROOT_FOUND"; sudo fdisk -l "$LOOP"; exit 2; fi
+          sudo python3 "$GITHUB_WORKSPACE/tools/fan-audit-temp1.py" "$ROOT" > "$GITHUB_WORKSPACE/fan-report.txt"
+          echo '===== BEGIN FAN FORENSIC RESULTS ====='
+          head -c 140000 "$GITHUB_WORKSPACE/fan-report.txt"
+          echo
+          echo '===== END FAN FORENSIC RESULTS ====='
+          sudo umount /mnt/miner-ro
+          sudo losetup -d "$LOOP"
