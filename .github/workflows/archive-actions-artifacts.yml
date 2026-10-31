@@ -24,7 +24,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Archive verified Actions artifacts
+      - name: Archive and verify Actions artifacts
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -33,7 +33,8 @@ jobs:
           TAG="actions-artifacts-archive-${MONTH}"
           MAX_ASSET_BYTES=2147483647
           ARCHIVE_DIR="$RUNNER_TEMP/actions-artifact-archive"
-          mkdir -p "$ARCHIVE_DIR"
+          VERIFY_DIR="$RUNNER_TEMP/actions-artifact-verify"
+          mkdir -p "$ARCHIVE_DIR" "$VERIFY_DIR"
 
           ROWS="$(gh api --paginate \
             "repos/$GH_REPO/actions/artifacts?per_page=100" \
@@ -47,7 +48,7 @@ jobs:
           if ! gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "$GH_REPO" \
               --title "Actions artifacts archive $MONTH" \
-              --notes "Automatically archived GitHub Actions artifact ZIPs with SHA256 sidecars. Source artifacts are deleted only after release asset size verification."
+              --notes "Automatically archived GitHub Actions artifact ZIPs with SHA256 sidecars. Source artifacts are deleted only after remote release content verification."
           fi
 
           declare -A RUN_ALLOWED=()
@@ -84,6 +85,7 @@ jobs:
             ARCHIVE="$ARCHIVE_DIR/$ASSET_NAME"
             CHECKSUM="$ARCHIVE_DIR/${ASSET_NAME}.sha256"
             HEADERS="$ARCHIVE_DIR/${ASSET_NAME}.headers"
+            REMOTE_FILE="$VERIFY_DIR/$ASSET_NAME"
 
             echo "::group::Archive $ARTIFACT_NAME (run $RUN_ID, artifact $ARTIFACT_ID)"
 
@@ -120,7 +122,7 @@ jobs:
 
             ACTUAL_SIZE="$(stat -c '%s' "$ARCHIVE")"
             if [[ "$ACTUAL_SIZE" != "$ARTIFACT_SIZE" ]]; then
-              echo "Size mismatch: API=$ARTIFACT_SIZE downloaded=$ACTUAL_SIZE. Keeping source."
+              echo "Source size mismatch: API=$ARTIFACT_SIZE downloaded=$ACTUAL_SIZE. Keeping source."
               rm -f "$ARCHIVE"
               SKIPPED=$((SKIPPED + 1))
               echo "::endgroup::"
@@ -133,16 +135,30 @@ jobs:
 
             gh release upload "$TAG" "$ARCHIVE" "$CHECKSUM" --repo "$GH_REPO" --clobber
 
+            # Download the published asset and compare its cryptographic hash before deleting source.
+            rm -f "$REMOTE_FILE"
+            gh release download "$TAG" --pattern "$ASSET_NAME" --dir "$VERIFY_DIR" --repo "$GH_REPO"
+            REMOTE_SIZE="$(stat -c '%s' "$REMOTE_FILE")"
+            if [[ "$REMOTE_SIZE" != "$ACTUAL_SIZE" ]]; then
+              echo "Release asset size mismatch. Keeping source artifact."
+              SKIPPED=$((SKIPPED + 1))
+              rm -f "$ARCHIVE" "$CHECKSUM" "$REMOTE_FILE"
+              echo "::endgroup::"
+              continue
+            fi
+
+            (cd "$VERIFY_DIR" && sha256sum -c "${ASSET_NAME}.sha256")
+
             ASSETS="$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq '.assets[] | [.name, (.size | tostring)] | @tsv')"
             grep -Fqx -- "$(printf '%s\t%s' "$ASSET_NAME" "$ACTUAL_SIZE")" <<< "$ASSETS"
             grep -Fqx -- "$(printf '%s\t%s' "${ASSET_NAME}.sha256" "$CHECKSUM_SIZE")" <<< "$ASSETS"
 
-            # Remove the Actions copy only after the Release copy and checksum are verified.
+            # Remove the Actions copy only after the remote release file passes SHA256.
             gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID" >/dev/null
 
-            echo "Archived and verified: $ASSET_NAME ($ACTUAL_SIZE bytes, SHA256 $HASH); source deleted."
+            echo "Archived and SHA256-verified: $ASSET_NAME ($ACTUAL_SIZE bytes, $HASH); source deleted."
             ARCHIVED=$((ARCHIVED + 1))
-            rm -f "$ARCHIVE" "$CHECKSUM"
+            rm -f "$ARCHIVE" "$CHECKSUM" "$REMOTE_FILE" "$VERIFY_DIR/${ASSET_NAME}.sha256"
             echo "::endgroup::"
           done <<< "$ROWS"
 
@@ -150,7 +166,7 @@ jobs:
             echo "## Actions artifact archive"
             echo "- Repository: $GH_REPO"
             echo "- Release: $TAG"
-            echo "- Archived and verified: $ARCHIVED"
+            echo "- Archived and SHA256-verified: $ARCHIVED"
             echo "- Skipped / retained: $SKIPPED"
           } >> "$GITHUB_STEP_SUMMARY"
 
