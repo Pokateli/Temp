@@ -40,134 +40,157 @@ jobs:
             "repos/$GH_REPO/actions/artifacts?per_page=100" \
             --jq '.artifacts[] | select(.expired == false) | [.id, .name, .size_in_bytes, .workflow_run.id] | @tsv')"
 
-          if [[ -z "$ROWS" ]]; then
-            echo "No active Actions artifacts to archive."
-            exit 0
-          fi
-
-          if ! gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+          RELEASE_EXISTS=0
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            RELEASE_EXISTS=1
+          elif [[ -n "$ROWS" ]]; then
             gh release create "$TAG" --repo "$GH_REPO" \
               --title "Actions artifacts archive $MONTH" \
-              --notes "Automatically archived GitHub Actions artifact ZIPs with SHA256 sidecars. Source artifacts are deleted only after remote release content verification."
+              --notes "Automatically archived GitHub Actions artifact ZIPs with SHA256 sidecars. Source artifacts are deleted only after GitHub's remote SHA256 digest and asset metadata are verified."
+            RELEASE_EXISTS=1
           fi
 
           declare -A RUN_ALLOWED=()
           ARCHIVED=0
           SKIPPED=0
 
-          while IFS=$'\t' read -r ARTIFACT_ID ARTIFACT_NAME ARTIFACT_SIZE RUN_ID; do
-            [[ -n "${ARTIFACT_ID:-}" ]] || continue
+          if [[ -n "$ROWS" ]]; then
+            while IFS=$'\t' read -r ARTIFACT_ID ARTIFACT_NAME ARTIFACT_SIZE RUN_ID; do
+              [[ -n "${ARTIFACT_ID:-}" ]] || continue
 
-            if [[ -z "${RUN_ALLOWED[$RUN_ID]+x}" ]]; then
-              RUN_META="$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID" --jq '[.event, (.head_repository.full_name // "")] | @tsv')"
-              IFS=$'\t' read -r RUN_EVENT HEAD_REPO <<< "$RUN_META"
-              if [[ "$RUN_EVENT" == "pull_request" || "$HEAD_REPO" != "$GH_REPO" ]]; then
-                RUN_ALLOWED[$RUN_ID]=0
-              else
-                RUN_ALLOWED[$RUN_ID]=1
+              if [[ -z "${RUN_ALLOWED[$RUN_ID]+x}" ]]; then
+                RUN_META="$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID" --jq '[.event, (.head_repository.full_name // "")] | @tsv')"
+                IFS=$'\t' read -r RUN_EVENT HEAD_REPO <<< "$RUN_META"
+                if [[ "$RUN_EVENT" == "pull_request" || "$HEAD_REPO" != "$GH_REPO" ]]; then
+                  RUN_ALLOWED[$RUN_ID]=0
+                else
+                  RUN_ALLOWED[$RUN_ID]=1
+                fi
               fi
-            fi
 
-            if [[ "${RUN_ALLOWED[$RUN_ID]}" != "1" ]]; then
-              echo "Skipping untrusted or pull-request artifact $ARTIFACT_ID ($ARTIFACT_NAME)."
-              SKIPPED=$((SKIPPED + 1))
-              continue
-            fi
+              if [[ "${RUN_ALLOWED[$RUN_ID]}" != "1" ]]; then
+                echo "Skipping untrusted or pull-request artifact $ARTIFACT_ID ($ARTIFACT_NAME)."
+                SKIPPED=$((SKIPPED + 1))
+                continue
+              fi
 
-            if (( ARTIFACT_SIZE >= MAX_ASSET_BYTES )); then
-              echo "Skipping artifact $ARTIFACT_ID ($ARTIFACT_NAME): exceeds 2 GiB release asset limit."
-              SKIPPED=$((SKIPPED + 1))
-              continue
-            fi
+              if (( ARTIFACT_SIZE >= MAX_ASSET_BYTES )); then
+                echo "Skipping artifact $ARTIFACT_ID ($ARTIFACT_NAME): exceeds 2 GiB release asset limit."
+                SKIPPED=$((SKIPPED + 1))
+                continue
+              fi
 
-            SAFE_NAME="$(printf '%s' "$ARTIFACT_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | cut -c1-80)"
-            ASSET_NAME="run-${RUN_ID}-artifact-${ARTIFACT_ID}-${SAFE_NAME}.zip"
-            ARCHIVE="$ARCHIVE_DIR/$ASSET_NAME"
-            CHECKSUM="$ARCHIVE_DIR/${ASSET_NAME}.sha256"
-            HEADERS="$ARCHIVE_DIR/${ASSET_NAME}.headers"
-            REMOTE_FILE="$VERIFY_DIR/$ASSET_NAME"
+              SAFE_NAME="$(printf '%s' "$ARTIFACT_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | cut -c1-80)"
+              ASSET_NAME="run-${RUN_ID}-artifact-${ARTIFACT_ID}-${SAFE_NAME}.zip"
+              ARCHIVE="$ARCHIVE_DIR/$ASSET_NAME"
+              CHECKSUM="$ARCHIVE_DIR/${ASSET_NAME}.sha256"
+              HEADERS="$ARCHIVE_DIR/${ASSET_NAME}.headers"
 
-            echo "::group::Archive $ARTIFACT_NAME (run $RUN_ID, artifact $ARTIFACT_ID)"
+              echo "::group::Archive $ARTIFACT_NAME (run $RUN_ID, artifact $ARTIFACT_ID)"
 
-            # Obtain the short-lived signed URL without following the redirect.
-            # Never forward the repository token to GitHub's external blob host.
-            HTTP_STATUS="$(curl --silent --show-error --retry 4 --retry-delay 2 \
-              --output /dev/null --dump-header "$HEADERS" --write-out '%{http_code}' \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID/zip")"
+              # Obtain the short-lived signed URL without following the redirect.
+              # Never forward the repository token to GitHub's external blob host.
+              HTTP_STATUS="$(curl --silent --show-error --retry 4 --retry-delay 2 \
+                --output /dev/null --dump-header "$HEADERS" --write-out '%{http_code}' \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID/zip")"
 
-            if [[ "$HTTP_STATUS" != "302" && "$HTTP_STATUS" != "301" ]]; then
-              echo "Unexpected artifact API HTTP status: $HTTP_STATUS. Keeping source."
-              SKIPPED=$((SKIPPED + 1))
+              if [[ "$HTTP_STATUS" != "302" && "$HTTP_STATUS" != "301" ]]; then
+                echo "Unexpected artifact API HTTP status: $HTTP_STATUS. Keeping source."
+                SKIPPED=$((SKIPPED + 1))
+                rm -f "$HEADERS"
+                echo "::endgroup::"
+                continue
+              fi
+
+              DOWNLOAD_URL="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print }' "$HEADERS" | tail -n 1)"
               rm -f "$HEADERS"
+              if [[ -z "$DOWNLOAD_URL" ]]; then
+                echo "Missing signed download URL. Keeping source."
+                SKIPPED=$((SKIPPED + 1))
+                echo "::endgroup::"
+                continue
+              fi
+
+              # The signed URL is self-authorizing; no GitHub token is sent to this host.
+              curl --fail --location --silent --show-error \
+                --retry 4 --retry-delay 2 \
+                "$DOWNLOAD_URL" --output "$ARCHIVE"
+
+              ACTUAL_SIZE="$(stat -c '%s' "$ARCHIVE")"
+              if [[ "$ACTUAL_SIZE" != "$ARTIFACT_SIZE" ]]; then
+                echo "Source size mismatch: API=$ARTIFACT_SIZE downloaded=$ACTUAL_SIZE. Keeping source."
+                rm -f "$ARCHIVE"
+                SKIPPED=$((SKIPPED + 1))
+                echo "::endgroup::"
+                continue
+              fi
+
+              HASH="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+              printf '%s  %s\n' "$HASH" "$ASSET_NAME" > "$CHECKSUM"
+              CHECKSUM_SIZE="$(stat -c '%s' "$CHECKSUM")"
+
+              gh release upload "$TAG" "$ARCHIVE" "$CHECKSUM" --repo "$GH_REPO" --clobber
+
+              # GitHub exposes a server-computed SHA256 digest for release assets.
+              ASSET_META="$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | [.size, .digest] | @tsv')"
+              IFS=$'\t' read -r REMOTE_SIZE REMOTE_DIGEST <<< "$ASSET_META"
+              CHECKSUM_META="$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq --arg name "${ASSET_NAME}.sha256" '.assets[] | select(.name == $name) | [.size, .digest] | @tsv')"
+
+              if [[ "$REMOTE_SIZE" != "$ACTUAL_SIZE" || "$REMOTE_DIGEST" != "sha256:$HASH" || -z "$CHECKSUM_META" ]]; then
+                echo "Remote release digest/size verification failed. Keeping source artifact."
+                SKIPPED=$((SKIPPED + 1))
+                rm -f "$ARCHIVE" "$CHECKSUM"
+                echo "::endgroup::"
+                continue
+              fi
+
+              gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID" >/dev/null
+
+              echo "Archived and SHA256-verified: $ASSET_NAME ($ACTUAL_SIZE bytes, $HASH); source deleted."
+              ARCHIVED=$((ARCHIVED + 1))
+              rm -f "$ARCHIVE" "$CHECKSUM"
               echo "::endgroup::"
-              continue
-            fi
+            done <<< "$ROWS"
+          else
+            echo "No active Actions artifacts found; validating existing Release archive."
+          fi
 
-            DOWNLOAD_URL="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print }' "$HEADERS" | tail -n 1)"
-            rm -f "$HEADERS"
-            if [[ -z "$DOWNLOAD_URL" ]]; then
-              echo "Missing signed download URL. Keeping source."
-              SKIPPED=$((SKIPPED + 1))
-              echo "::endgroup::"
-              continue
-            fi
+          # Reconcile every archived ZIP against GitHub's server-side SHA256 digest.
+          if [[ "$RELEASE_EXISTS" == "1" ]]; then
+            rm -f "$VERIFY_DIR"/*
+            gh release download "$TAG" --pattern "*.zip.sha256" --dir "$VERIFY_DIR" --repo "$GH_REPO"
 
-            # The signed URL is self-authorizing; no GitHub token is sent to this host.
-            curl --fail --location --silent --show-error \
-              --retry 4 --retry-delay 2 \
-              "$DOWNLOAD_URL" --output "$ARCHIVE"
-
-            ACTUAL_SIZE="$(stat -c '%s' "$ARCHIVE")"
-            if [[ "$ACTUAL_SIZE" != "$ARTIFACT_SIZE" ]]; then
-              echo "Source size mismatch: API=$ARTIFACT_SIZE downloaded=$ACTUAL_SIZE. Keeping source."
-              rm -f "$ARCHIVE"
-              SKIPPED=$((SKIPPED + 1))
-              echo "::endgroup::"
-              continue
-            fi
-
-            HASH="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
-            printf '%s  %s\n' "$HASH" "$ASSET_NAME" > "$CHECKSUM"
-            CHECKSUM_SIZE="$(stat -c '%s' "$CHECKSUM")"
-
-            gh release upload "$TAG" "$ARCHIVE" "$CHECKSUM" --repo "$GH_REPO" --clobber
-
-            # Download the published asset and compare its cryptographic hash before deleting source.
-            rm -f "$REMOTE_FILE"
-            gh release download "$TAG" --pattern "$ASSET_NAME" --dir "$VERIFY_DIR" --repo "$GH_REPO"
-            REMOTE_SIZE="$(stat -c '%s' "$REMOTE_FILE")"
-            if [[ "$REMOTE_SIZE" != "$ACTUAL_SIZE" ]]; then
-              echo "Release asset size mismatch. Keeping source artifact."
-              SKIPPED=$((SKIPPED + 1))
-              rm -f "$ARCHIVE" "$CHECKSUM" "$REMOTE_FILE"
-              echo "::endgroup::"
-              continue
-            fi
-
-            (cd "$VERIFY_DIR" && sha256sum -c "${ASSET_NAME}.sha256")
-
-            ASSETS="$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq '.assets[] | [.name, (.size | tostring)] | @tsv')"
-            grep -Fqx -- "$(printf '%s\t%s' "$ASSET_NAME" "$ACTUAL_SIZE")" <<< "$ASSETS"
-            grep -Fqx -- "$(printf '%s\t%s' "${ASSET_NAME}.sha256" "$CHECKSUM_SIZE")" <<< "$ASSETS"
-
-            # Remove the Actions copy only after the remote release file passes SHA256.
-            gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID" >/dev/null
-
-            echo "Archived and SHA256-verified: $ASSET_NAME ($ACTUAL_SIZE bytes, $HASH); source deleted."
-            ARCHIVED=$((ARCHIVED + 1))
-            rm -f "$ARCHIVE" "$CHECKSUM" "$REMOTE_FILE" "$VERIFY_DIR/${ASSET_NAME}.sha256"
-            echo "::endgroup::"
-          done <<< "$ROWS"
+            ZIP_ROWS="$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq '.assets[] | select(.name | endswith(".zip")) | [.name, .size, .digest] | @tsv')"
+            VERIFIED=0
+            while IFS=$'\t' read -r ASSET_NAME ASSET_SIZE ASSET_DIGEST; do
+              [[ -n "${ASSET_NAME:-}" ]] || continue
+              SIDE="$VERIFY_DIR/${ASSET_NAME}.sha256"
+              if [[ ! -s "$SIDE" ]]; then
+                echo "Missing checksum sidecar for $ASSET_NAME"
+                exit 1
+              fi
+              EXPECTED_HASH="$(awk 'NR == 1 {print $1}' "$SIDE")"
+              REMOTE_HASH="${ASSET_DIGEST#sha256:}"
+              if [[ -z "$EXPECTED_HASH" || "$EXPECTED_HASH" != "$REMOTE_HASH" ]]; then
+                echo "SHA256 mismatch: $ASSET_NAME expected=$EXPECTED_HASH remote=$REMOTE_HASH"
+                exit 1
+              fi
+              VERIFIED=$((VERIFIED + 1))
+            done <<< "$ZIP_ROWS"
+          else
+            VERIFIED=0
+          fi
 
           {
             echo "## Actions artifact archive"
             echo "- Repository: $GH_REPO"
             echo "- Release: $TAG"
-            echo "- Archived and SHA256-verified: $ARCHIVED"
+            echo "- Newly archived and verified: $ARCHIVED"
+            echo "- Existing release ZIPs SHA256-verified: $VERIFIED"
             echo "- Skipped / retained: $SKIPPED"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "Completed: archived=$ARCHIVED skipped=$SKIPPED release=$TAG"
+          echo "Completed: archived=$ARCHIVED verified=$VERIFIED skipped=$SKIPPED release=$TAG"
