@@ -56,11 +56,11 @@ jobs:
           done < <(lsblk -rno PATH "$LOOP" | tail -n +2)
           if [ -z "$ROOT" ]; then echo "NO_ROOT_FOUND"; sudo fdisk -l "$LOOP"; exit 2; fi
           sudo mkdir -p /mnt/miner-cfg
-          sudo blkid -p "${LOOP}p3" || true
-          sudo mount -o ro "${LOOP}p3" /mnt/miner-cfg || echo 'Config partition unavailable'
-          sudo python3 "$GITHUB_WORKSPACE/tools/fan-audit-controller.py" "$ROOT" /mnt/miner-cfg > "$GITHUB_WORKSPACE/fan-report.txt"
+          sudo blkid -p "${LOOP}p1" || true
+          sudo mount -o ro "${LOOP}p1" /mnt/miner-cfg || echo 'Config partition unavailable'
+          sudo python3 "$GITHUB_WORKSPACE/tools/fan-config-audit.py" "$ROOT" /mnt/miner-cfg > "$GITHUB_WORKSPACE/fan-report.txt"
           echo '===== BEGIN FAN FORENSIC RESULTS ====='
-          head -c 280000 "$GITHUB_WORKSPACE/fan-report.txt"
+          head -c 50000 "$GITHUB_WORKSPACE/fan-report.txt"
           echo
           echo '===== END FAN FORENSIC RESULTS ====='
           sudo umount /mnt/miner-ro
