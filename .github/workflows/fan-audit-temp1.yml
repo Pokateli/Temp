@@ -21,8 +21,8 @@ jobs:
           set -Eeuo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq p7zip-full util-linux binutils unzip e2fsprogs > /dev/null
-          mkdir -p /mnt/forensic
-          cd /mnt/forensic
+          mkdir -p "$RUNNER_TEMP/forensic"
+          cd "$RUNNER_TEMP/forensic"
           for n in 001 002; do
             echo "Downloading part $n"
             curl -fL --retry 4 --retry-delay 5 --connect-timeout 30 --max-time 2400 -H "Authorization: Bearer $GH_TOKEN" -o "sdf.img.zip.$n" "https://github.com/Pokateli/Temp/releases/download/Temp_1/sdf.img.zip.$n"
