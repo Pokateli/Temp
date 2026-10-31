@@ -55,9 +55,9 @@ jobs:
             fi
           done < <(lsblk -rno PATH "$LOOP" | tail -n +2)
           if [ -z "$ROOT" ]; then echo "NO_ROOT_FOUND"; sudo fdisk -l "$LOOP"; exit 2; fi
-          sudo python3 "$GITHUB_WORKSPACE/tools/fan-audit-temp1.py" "$ROOT" > "$GITHUB_WORKSPACE/fan-report.txt"
+          sudo python3 "$GITHUB_WORKSPACE/tools/fan-audit-deep.py" "$ROOT" > "$GITHUB_WORKSPACE/fan-report.txt"
           echo '===== BEGIN FAN FORENSIC RESULTS ====='
-          head -c 140000 "$GITHUB_WORKSPACE/fan-report.txt"
+          head -c 200000 "$GITHUB_WORKSPACE/fan-report.txt"
           echo
           echo '===== END FAN FORENSIC RESULTS ====='
           sudo umount /mnt/miner-ro
