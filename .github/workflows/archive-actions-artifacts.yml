@@ -83,15 +83,40 @@ jobs:
             ASSET_NAME="run-${RUN_ID}-artifact-${ARTIFACT_ID}-${SAFE_NAME}.zip"
             ARCHIVE="$ARCHIVE_DIR/$ASSET_NAME"
             CHECKSUM="$ARCHIVE_DIR/${ASSET_NAME}.sha256"
+            HEADERS="$ARCHIVE_DIR/${ASSET_NAME}.headers"
 
             echo "::group::Archive $ARTIFACT_NAME (run $RUN_ID, artifact $ARTIFACT_ID)"
-            curl --fail --location --silent --show-error \
-              --retry 4 --retry-delay 2 \
+
+            # Obtain the short-lived signed URL without following the redirect.
+            # Never forward the repository token to GitHub's external blob host.
+            HTTP_STATUS="$(curl --silent --show-error --retry 4 --retry-delay 2 \
+              --output /dev/null --dump-header "$HEADERS" --write-out '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID/zip" \
-              --output "$ARCHIVE"
+              "https://api.github.com/repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID/zip")"
+
+            if [[ "$HTTP_STATUS" != "302" && "$HTTP_STATUS" != "301" ]]; then
+              echo "Unexpected artifact API HTTP status: $HTTP_STATUS. Keeping source."
+              SKIPPED=$((SKIPPED + 1))
+              rm -f "$HEADERS"
+              echo "::endgroup::"
+              continue
+            fi
+
+            DOWNLOAD_URL="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print }' "$HEADERS" | tail -n 1)"
+            rm -f "$HEADERS"
+            if [[ -z "$DOWNLOAD_URL" ]]; then
+              echo "Missing signed download URL. Keeping source."
+              SKIPPED=$((SKIPPED + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            # The signed URL is self-authorizing; no GitHub token is sent to this host.
+            curl --fail --location --silent --show-error \
+              --retry 4 --retry-delay 2 \
+              "$DOWNLOAD_URL" --output "$ARCHIVE"
 
             ACTUAL_SIZE="$(stat -c '%s' "$ARCHIVE")"
             if [[ "$ACTUAL_SIZE" != "$ARTIFACT_SIZE" ]]; then
