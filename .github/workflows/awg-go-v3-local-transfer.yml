@@ -1,0 +1,67 @@
+name: AWG-go v3 offline build and local transfer (no VM)
+on:
+  push:
+    paths:
+      - '.github/workflows/awg-go-v3-local-transfer.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Install Go 1.25.0
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.0'
+          check-latest: false
+      - name: Fetch sources and build stock AWG-go v3
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export GOTOOLCHAIN=local
+          test "$(go version | awk '{print $3}')" = go1.25.0
+          git clone --depth=1 https://github.com/amnezia-vpn/amneziawg-go.git /tmp/amneziawg-go
+          cd /tmp/amneziawg-go
+          test -f go.mod
+          grep -Fq 'module github.com/amnezia-vpn/amneziawg-go/v3' go.mod
+          git rev-parse HEAD > /tmp/awg-go-v3-SOURCE_COMMIT.txt
+          go mod download
+          go mod vendor
+          mkdir -p /tmp/awg-transfer/bin
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -o /tmp/awg-transfer/bin/amneziawg-go .
+          /tmp/awg-transfer/bin/amneziawg-go --version
+          cp /tmp/awg-go-v3-SOURCE_COMMIT.txt /tmp/awg-transfer/SOURCE_COMMIT.txt
+          cp go.mod go.sum /tmp/awg-transfer/
+      - name: Assemble offline kit with toolchain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p kit/awg-go-src kit/go-toolchain output
+          cp -a /tmp/amneziawg-go/. kit/awg-go-src/
+          cp -a /tmp/awg-transfer/bin kit/
+          cp -a /tmp/awg-transfer/SOURCE_COMMIT.txt kit/
+          GO_ROOT="$(go env GOROOT)"
+          tar -C "$GO_ROOT" -cf - . | zstd -q -6 -T0 -o kit/go1.25.0-linux-amd64.tar.zst
+          cat > kit/README.txt <<'EOF'
+          AWG-go v3 offline kit
+          - Go 1.25.0 compiler: go1.25.0-linux-amd64.tar.zst (extract into ./go)
+          - Stock upstream AWG-go v3 source with vendor dependencies: awg-go-src/
+          - Stock executable: bin/amneziawg-go
+          No credentials or client configuration are included.
+          For offline rebuild: export GOTOOLCHAIN=local GOFLAGS=-mod=vendor GOPROXY=off;
+          ./go/bin/go build -o amneziawg-go ./awg-go-src
+          EOF
+          (cd kit && tar -cf - --exclude=go1.25.0-linux-amd64.tar.zst . | zstd -q -10 -T0 -o ../output/awg-go-v3-src-vendor-bin.tar.zst)
+          mv kit/go1.25.0-linux-amd64.tar.zst output/
+          (cd output && sha256sum *.tar.zst > SHA256SUMS)
+          du -h output/*
+      - name: Upload for local download only
+        uses: actions/upload-artifact@v4
+        with:
+          name: awg-go-v3-offline-linux-amd64
+          path: output/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
