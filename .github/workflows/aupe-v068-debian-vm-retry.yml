@@ -1,4 +1,4 @@
-name: AUPE v0.5.68 Debian13 VM Test corrected SHA shell (no artifacts)
+name: AUPE v0.5.68 Debian13 VM host QEMU (no artifacts)
 on:
   push:
     branches: [aupe/0.5.68-rust-parity]
