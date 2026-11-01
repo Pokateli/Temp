@@ -1,0 +1,46 @@
+name: AUPE 0.5.69 Rust core compile and C parity (NO VM, NO artifacts)
+on:
+  push:
+    branches:
+      - aupe/0.5.69-rust-kernel-core
+    paths:
+      - .github/workflows/aupe-069-rust-core.yml
+      - aupe-lab/v069-rust-kernel-core/**
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain 1.89 (ephemeral)
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+      - name: Rust unit tests, no network and no persistent caches
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v069-rust-kernel-core
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/aupe069-cargo"
+          cargo test --release --offline --locked --manifest-path rust/Cargo.toml
+          cargo build --release --offline --locked --manifest-path rust/Cargo.toml --bin kernel_smoke
+          "$CARGO_TARGET_DIR/release/kernel_smoke"
+      - name: no_std standalone rlib (no Linux VM)
+        run: |
+          set -euo pipefail
+          rustc --edition=2024 --crate-name aupe_rust_core --crate-type=rlib \
+            -C panic=abort aupe-lab/v069-rust-kernel-core/rust/src/lib.rs \
+            -o "$RUNNER_TEMP/aupe069_nostd.rlib"
+      - name: GCC original C suite against Rust implementation
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v069-rust-kernel-core
+          CC=gcc bash scripts/run_ffi_diff.sh
+      - name: Clang original C suite against Rust implementation
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v069-rust-kernel-core
+          CC=clang bash scripts/run_ffi_diff.sh
