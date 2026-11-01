@@ -29,8 +29,8 @@ fn packet()->[u8;28] {
 }
 fn main(){
   let p=AlignedBuffer::new(aupe_rs_peer_size(),aupe_rs_peer_align());
-  let wsize=aupe_rust_core::aupe_rust_sizeof_frag();
-  let work:[AlignedBuffer;4]=std::array::from_fn(|_|AlignedBuffer::new(wsize,8));
+  let wsize=aupe_rs_workspace_size();
+  let work:[AlignedBuffer;4]=std::array::from_fn(|_|AlignedBuffer::new(wsize,aupe_rs_workspace_align()));
   let ws=[work[0].ptr,work[1].ptr,work[2].ptr,work[3].ptr];
   let peer=p.ptr as *mut KernelPeerCore;
   let key=[7u8;32];
