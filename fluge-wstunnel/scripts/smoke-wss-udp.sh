@@ -74,7 +74,11 @@ print('FAIL: WSS UDP echo did not return', file=sys.stderr)
 sys.exit(1)
 PY
 then
-  echo "Test complete (local only; ChatGPT↔MCP transport NOT tested)."
+  echo "Direct UDP baseline (loopback):"
+  python3 "$(dirname "$0")/benchmark_udp.py" --port "$ECHO_UDP_PORT" --samples 100 --size 1200
+  echo "WSS/UDP forwarding RTT and serial-goodput:"
+  python3 "$(dirname "$0")/benchmark_udp.py" --port "$LOCAL_UDP_PORT" --samples 100 --size 1200
+  echo "Test complete (local WSS↔UDP; ChatGPT↔MCP transport NOT tested)."
 else
   echo '--- server.log ---' >&2
   tail -n 40 "$TMP/server.log" >&2
