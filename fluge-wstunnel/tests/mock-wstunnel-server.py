@@ -4,6 +4,8 @@ import asyncio
 import base64
 import json
 import sys
+import os
+import ssl
 import websockets
 
 def decode_header(headers):
@@ -27,7 +29,11 @@ async def handler(ws):
 
 async def main():
     port = int(sys.argv[1])
-    async with websockets.serve(handler, '127.0.0.1', port, subprotocols=['v1']):
+    context = None
+    if os.environ.get('MOCK_WSS_CERT') and os.environ.get('MOCK_WSS_KEY'):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(os.environ['MOCK_WSS_CERT'], os.environ['MOCK_WSS_KEY'])
+    async with websockets.serve(handler, '127.0.0.1', port, subprotocols=['v1'], ssl=context):
         print('READY', flush=True)
         await asyncio.Event().wait()
 
