@@ -1,1 +1,43 @@
-The requested file reference is not currently visible. Use files.search or files.list to rediscover the file, then retry with a returned ref_id or file_id.
+name: AUPE v0.5.67 Rust vs C (Temp, no artifacts)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/aupe-v067-temp-rust.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout isolated 0.5.67 comparison sources
+        uses: actions/checkout@v4
+        with:
+          ref: aupe/0.5.67-rust-compare
+          persist-credentials: false
+      - name: Download pinned Rust compiler on Temp runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --fail --show-error --silent --location https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+            source "$HOME/.cargo/env"
+          fi
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          rustc --version
+          cargo --version
+      - name: C and Rust differential tests (GCC)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v067-rust-compare
+          CC=gcc AUPE_REQUIRE_RUST=1 bash tools/compare.sh
+      - name: C and Rust differential tests (Clang)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v067-rust-compare
+          CC=clang AUPE_REQUIRE_RUST=1 bash tools/compare.sh
