@@ -1,0 +1,67 @@
+# Single-run lookup of 5.01 donor. No Actions artifacts or caches.
+name: Extra II 5.1 donor lookup (no artifacts)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/extra2-5x-probe.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  look-up-5x:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test official firmware URLs and inspect
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p donor-work keenetic-extra-ii/reports
+          R=keenetic-extra-ii/reports/5x-donor-probe.md
+          {
+            echo '# KeeneticOS 5.1.8 KN-1713 donor lookup'
+            echo
+            echo 'For platform/ABI research only: KN-1713 firmware is NOT a ki_rb firmware.'
+            echo 'Binaries are transient; no artifact/cache/release asset.'
+            echo
+          } > "$R"
+          n=0
+          probe() {
+            local url="$1" out
+            n=$((n+1));out="donor-work/candidate-$n.bin"
+            echo "## Candidate $n" >> "$R"
+            echo "\`$url\`" >> "$R"
+            if ! curl -fLsS --retry 0 --connect-timeout 12 --max-time 45 "$url" -o "$out";then
+              echo 'Unavailable' >> "$R";echo >> "$R";return
+            fi
+            local count
+            count=$(wc -c < "$out")
+            echo "Bytes: $count" >> "$R"
+            if [ "$count" -gt 22000000 ] || [ "$count" -lt 500000 ];then
+              echo 'Rejected due to size' >> "$R";echo >> "$R";return
+            fi
+            echo '~~~json' >> "$R"
+            python3 keenetic-extra-ii/firmware_gate.py "$out" --profile KN-1713 --sdk-unpack >> "$R" 2>&1 || true
+            echo '~~~' >> "$R";echo >> "$R"
+          }
+          probe 'https://osvault.keenetic.ru/KN-1713/KN-1713_preview_5.01.C.8.0-2.bin'
+          probe 'https://osvault.keenetic.ru/KN-1713/KN-1713_stable_5.01.C.8.0-2.bin'
+          probe 'https://osvault.keenetic.ru/KN-1713/KN-1713_draft_5.01.C.8.0-2.bin'
+          probe 'https://osvault.keenetic.net/KN-1713/KN-1713_preview_5.01.C.8.0-2.bin'
+          probe 'https://osvault.keenetic.ru/ki_rb/ki_rb_draft_4.03.C.6.3-9.bin'
+          echo '## Notes' >> "$R"
+          echo '5.01 SDK requires firmware donor via unpack.sh; no native ki_rb profile.' >> "$R"
+          cat "$R" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish metadata-only report to main
+        shell: bash
+        run: |
+          set -e
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add keenetic-extra-ii/reports/5x-donor-probe.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'docs(extra2): record availability of full 5.01 donor'
+            git push origin HEAD:main
+          fi
