@@ -1,4 +1,4 @@
-name: AUPE 0.5.68 Rust no_std compile check (no artifacts)
+name: AUPE 0.5.68 Rust no_std rlib check (no artifacts)
 on:
   push:
     branches: [aupe/0.5.68-rust-parity]
@@ -21,4 +21,4 @@ jobs:
       - name: Check Rust core without std and external Cargo dependencies
         run: |
           set -euo pipefail
-          cargo check --offline --locked --manifest-path aupe-lab/v068-rust-parity/rust/Cargo.toml --no-default-features --lib
+          rustc --edition=2024 --crate-name aupe_rust_core --crate-type=rlib -C panic=abort aupe-lab/v068-rust-parity/rust/src/lib.rs -o /tmp/libaupe_rust_core_nostd.rlib\n          ls -lh /tmp/libaupe_rust_core_nostd.rlib
