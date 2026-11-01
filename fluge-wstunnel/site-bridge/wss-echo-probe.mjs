@@ -5,12 +5,12 @@ import {openWstunnel} from './wstunnel-v11-client.mjs';
 export async function probeWssEcho({
   endpoint, destinationPort = 51821, size = 1200, timeoutMs = 3000,
   cryptoAPI = globalThis.crypto, socketFactory,
-  allowPlainLoopback = false, now = () => performance.now(),
+  allowPlainLoopback = false, pathPrefix = 'v1', now = () => performance.now(),
 }) {
   if (!Number.isInteger(size) || size < 1 || size > 60000) throw new Error('Invalid size');
   if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 30000) throw new Error('Invalid timeout');
   const tunnel = await openWstunnel({endpoint, destinationPort,
-    cryptoAPI, socketFactory, allowPlainLoopback,
+    cryptoAPI, socketFactory, allowPlainLoopback, pathPrefix,
     connectTimeoutMs: timeoutMs});
   let timer;
   try {
