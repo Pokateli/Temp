@@ -8,6 +8,9 @@ await assert.rejects(makeWstunnelUpgrade({endpoint, allowPlainLoopback: true,
   destinationHost: '192.168.1.1'}), /Destination must/);
 const config = await makeWstunnelUpgrade({endpoint, allowPlainLoopback: true});
 assert.equal(new URL(config.url).pathname,'/v1/events');
+const securePath = await makeWstunnelUpgrade({endpoint, allowPlainLoopback:true, pathPrefix:'fluge_secret_123'});
+assert.equal(new URL(securePath.url).pathname,'/fluge_secret_123/events');
+await assert.rejects(makeWstunnelUpgrade({endpoint,allowPlainLoopback:true,pathPrefix:'../unsafe'}),/Invalid secret path prefix/);
 assert.equal(config.protocols[0], 'v1');
 assert.match(config.protocols[1], /^authorization\.bearer\.[^.]+\.[^.]+\.[^.]+$/);
 const tunnel = await openWstunnel({endpoint, allowPlainLoopback: true});
