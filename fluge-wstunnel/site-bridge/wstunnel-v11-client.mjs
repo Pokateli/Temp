@@ -29,6 +29,7 @@ async function encodeTunnelJWT(payload, cryptoAPI) {
 export async function makeWstunnelUpgrade({
   endpoint, destinationHost = '127.0.0.1', destinationPort = 51820,
   protocol = 'udp', requestId, cryptoAPI = globalThis.crypto, allowPlainLoopback = false,
+  pathPrefix = 'v1',
 }) {
   const url = new URL(endpoint);
   if (!(url.protocol === 'wss:' || (allowPlainLoopback && url.protocol === 'ws:' &&
@@ -36,7 +37,8 @@ export async function makeWstunnelUpgrade({
     throw new Error('WSS is required except for explicit loopback tests');
   }
   if (url.username || url.password || url.hash || url.search) throw new Error('Unexpected URL credentials, fragment or query');
-  if (url.pathname !== '/' && url.pathname !== '/v1/events') throw new Error('Only /v1/events is supported');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(pathPrefix)) throw new Error('Invalid secret path prefix');
+  if (url.pathname !== '/' && url.pathname !== '/' + pathPrefix + '/events') throw new Error('Unexpected upgrade path');
   if (destinationHost !== '127.0.0.1' && destinationHost !== 'localhost') {
     throw new Error('Destination must be the restricted WG service on the server loopback');
   }
@@ -53,15 +55,16 @@ export async function makeWstunnelUpgrade({
     r: destinationHost, rp: destinationPort,
   };
   const jwt = await encodeTunnelJWT(payload, cryptoAPI);
-  url.pathname = '/v1/events';
+  url.pathname = '/' + pathPrefix + '/events';
   return { url: url.toString(), protocols: ['v1', SECRET_PREFIX + jwt] };
 }
 export async function openWstunnel({ endpoint, destinationHost, destinationPort, protocol = 'udp',
   socketFactory = (url, protocols) => new WebSocket(url, protocols),
   cryptoAPI = globalThis.crypto, allowPlainLoopback = false, connectTimeoutMs = 8000,
+  pathPrefix = 'v1',
 } = {}) {
   const upgrade = await makeWstunnelUpgrade({ endpoint, destinationHost, destinationPort, protocol,
-    cryptoAPI, allowPlainLoopback });
+    cryptoAPI, allowPlainLoopback, pathPrefix });
   const ws = socketFactory(upgrade.url, upgrade.protocols);
   ws.binaryType = 'arraybuffer';
   const incoming = [], waiters = [];
