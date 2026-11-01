@@ -9,7 +9,7 @@ curl --fail --show-error --retry 3 -L "$URL" -o "$TEMP/debian.zip"
 file "$TEMP/debian.zip"
 unzip -Z1 "$TEMP/debian.zip" | head -40
 unzip -q "$TEMP/debian.zip" -d "$TEMP/extracted"
-expected="$(awk 'NR==1 {print $1}' "$TEMP/extracted/debian13-qemu-bundle.tar.gz.sha256")
+expected="$(awk 'NR==1 {print $1}' "$TEMP/extracted/debian13-qemu-bundle.tar.gz.sha256")"
 actual="$(sha256sum "$TEMP/extracted/debian13-qemu-bundle.tar.gz" | cut -d' ' -f1)"
 [ "$expected" = "$actual" ] || { echo "VM bundle SHA256 mismatch" >&2; exit 22; }
 echo "Nested Debian13 bundle SHA256: verified ($actual)"
