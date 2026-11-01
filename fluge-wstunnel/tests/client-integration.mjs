@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { openWstunnel, makeWstunnelUpgrade } from '../site-bridge/wstunnel-v11-client.mjs';
 const port = Number(process.argv[2] || 18761);
-const endpoint = 'ws://127.0.0.1:' + port;
-await assert.rejects(makeWstunnelUpgrade({endpoint}), /WSS is required/);
+const secure = process.argv.includes('--wss');
+const endpoint = (secure ? 'wss' : 'ws') + '://127.0.0.1:' + port;
+if (!secure) await assert.rejects(makeWstunnelUpgrade({endpoint}), /WSS is required/);
 await assert.rejects(makeWstunnelUpgrade({endpoint, allowPlainLoopback: true,
   destinationHost: '192.168.1.1'}), /Destination must/);
 const config = await makeWstunnelUpgrade({endpoint, allowPlainLoopback: true});
