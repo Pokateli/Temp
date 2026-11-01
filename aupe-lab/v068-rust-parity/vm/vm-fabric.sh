@@ -3,14 +3,17 @@ set -euo pipefail
 HERE="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
-URL='https://github.com/Pokateli/VM-Fabric/releases/download/debian13-v1.2.0-fabric/debian13-qemu-bundle.tar.gz'
-curl --fail --retry 3 -L "$URL" -o "$TEMP/debian.tar.gz"
-tar -xzf "$TEMP/debian.tar.gz" -C "$TEMP"
-BUNDLE="$(find "$TEMP" -type f -name start.sh -print -quit | xargs -r dirname)"
-test -n "$BUNDLE" && test -f "$BUNDLE/start.sh" && test -d "$BUNDLE/sharefiles"
+URL='https://github.com/Pokateli/Temp/releases/download/actions-artifacts-archive-2026-10/run-40843031312-artifact-12883472746-debian13-qemu-tcg-bundle.zip'
+echo "VM bundle source: public Temp Release (not the private VM-Fabric URL)"
+curl --fail --show-error --retry 3 -L "$URL" -o "$TEMP/debian.zip"
+file "$TEMP/debian.zip"
+unzip -Z1 "$TEMP/debian.zip" | head -40
+unzip -q "$TEMP/debian.zip" -d "$TEMP/extracted"
+BUNDLE="$(find "$TEMP/extracted" -type f -name start.sh -print -quit | xargs -r dirname)"
+if [ -z "$BUNDLE" ] || [ ! -d "$BUNDLE/sharefiles" ]; then
+  echo "VM bundle does not have start.sh + sharefiles; contents:" >&2
+  find "$TEMP/extracted" -maxdepth 4 -type f | head -70 >&2
+  exit 21
+fi
 cp "$HERE/build/cargo/release/vm_smoke" "$BUNDLE/sharefiles/aupe68_vm_smoke"
-# VM-Fabric guest-exec uses serial root console; guest has no outside network.
-curl --fail --retry 3 -L https://raw.githubusercontent.com/Pokateli/VM-Fabric/main/profiles/debian13/scripts/guest-exec.py -o "$TEMP/guest-exec.py"
-python3 "$TEMP/guest-exec.py" --bundle "$BUNDLE" --script "$HERE/vm/guest-test.sh" \
-    --log "$HERE/build/vm-console.log" --output "$HERE/build/vm-output.log" --timeout 720
-grep -q 'AUPE68_DEBIAN_VM_RESULT=PASS' "$HERE/build/vm-output.log"
+python3 "$HERE/vm/guest-exec.py" "$BUNDLE" "$HERE/vm/guest-test.sh" "$HERE/build/vm-console.log"

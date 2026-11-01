@@ -1,0 +1,32 @@
+name: AUPE v0.5.68 Debian13 VM Test via public Temp Release (no artifacts)
+on:
+  push:
+    branches: [aupe/0.5.68-rust-parity]
+    paths: [.github/workflows/aupe-v068-debian-vm-retry.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  vm-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: QEMU x86_64 and Rust 1.89
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-system-x86 qemu-utils dosfstools mtools unzip
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+      - name: Build Rust binary for Debian 13
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v068-rust-parity
+          export CARGO_TARGET_DIR="$PWD/build/cargo"
+          cargo build --offline --locked --release --manifest-path rust/Cargo.toml --bin vm_smoke
+      - name: QEMU offline Debian 13 via Temp
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v068-rust-parity
+          bash vm/vm-fabric.sh

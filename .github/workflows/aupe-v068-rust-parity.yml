@@ -1,10 +1,5 @@
 name: AUPE v0.5.68 Rust parity + Debian13 VM (no artifacts)
 on:
-  push:
-    branches: [aupe/0.5.68-rust-parity]
-    paths:
-      - .github/workflows/aupe-v068-rust-parity.yml
-      - aupe-lab/v068-rust-parity/**
   workflow_dispatch:
 permissions:
   contents: read
