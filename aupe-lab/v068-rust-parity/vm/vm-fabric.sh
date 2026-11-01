@@ -9,6 +9,8 @@ curl --fail --show-error --retry 3 -L "$URL" -o "$TEMP/debian.zip"
 file "$TEMP/debian.zip"
 unzip -Z1 "$TEMP/debian.zip" | head -40
 unzip -q "$TEMP/debian.zip" -d "$TEMP/extracted"
+( cd "$TEMP/extracted" && sha256sum -c debian13-qemu-bundle.tar.gz.sha256 )
+tar -xzf "$TEMP/extracted/debian13-qemu-bundle.tar.gz" -C "$TEMP/extracted"
 BUNDLE="$(find "$TEMP/extracted" -type f -name start.sh -print -quit | xargs -r dirname)"
 if [ -z "$BUNDLE" ] || [ ! -d "$BUNDLE/sharefiles" ]; then
   echo "VM bundle does not have start.sh + sharefiles; contents:" >&2
