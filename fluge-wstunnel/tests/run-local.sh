@@ -25,3 +25,4 @@ for _ in $(seq 1 50); do
 done
 if ! grep -q '^READY$' "$TMP/server.log"; then echo 'WSS mock failed to start' >&2; cat "$TMP/server.log" >&2; exit 1; fi
 NODE_EXTRA_CA_CERTS="$TMP/cert.pem" node "$BASE/tests/client-integration.mjs" "$PORT" --wss
+NODE_EXTRA_CA_CERTS="$TMP/cert.pem" node "$BASE/tests/probe-integration.mjs" "$PORT"
