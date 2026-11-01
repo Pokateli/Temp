@@ -1,0 +1,83 @@
+# One-time donor research: no upload-artifact, cache, or scheduled trigger.
+name: Extra II donor reconnaissance (no artifacts)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/extra2-donor-probe.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  donor-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch ki_rb donor firmware and inspect (ephemeral)
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p donor-work keenetic-extra-ii/reports
+          R=keenetic-extra-ii/reports/donor-probe.md
+          {
+            echo '# ZyXEL Keenetic Extra II donor reconnaissance'
+            echo
+            echo 'Downloads are ephemeral. No firmware binary, artifact, cache or release asset is uploaded.'
+            echo 'Static inspection is not a router boot test.'
+            echo
+          } > "$R"
+          probe() {
+            local label="$1" url="$2" target="donor-work/$1"
+            echo "## $label" >> "$R"
+            echo "Source: \`$url\`" >> "$R"
+            echo >> "$R"
+            if ! curl -fLsS --retry 1 --connect-timeout 15 --max-time 100 "$url" -o "$target"; then
+              echo 'Download failed; source unavailable.' >> "$R"
+              echo >> "$R"
+              return
+            fi
+            local bytes
+            bytes=$(wc -c < "$target")
+            echo "Downloaded bytes: $bytes" >> "$R"
+            if [ "$bytes" -gt 21000000 ] || [ "$bytes" -lt 300000 ]; then
+              echo 'Rejected unexpected file size.' >> "$R"; echo >> "$R"; return
+            fi
+            if [[ "$url" == *.zip ]]; then
+              local entry
+              entry=$(unzip -Z1 "$target" | grep -Ei '\.bin$' | head -1 || true)
+              if [ -z "$entry" ]; then
+                echo 'ZIP has no BIN payload.' >> "$R"; return
+              fi
+              unzip -p "$target" "$entry" > "$target.bin" || return
+              target="$target.bin"
+            fi
+            echo 'SHA256:' >> "$R"
+            sha256sum "$target" >> "$R"
+            echo >> "$R"
+            echo 'Structure (NOT boot verification):' >> "$R"
+            echo '~~~json' >> "$R"
+            python3 keenetic-extra-ii/firmware_gate.py "$target" --profile ki_rb >> "$R" 2>&1 || true
+            echo '~~~' >> "$R"; echo >> "$R"
+          }
+          probe 'ki_rb_4.03.C.6.3-9' 'https://osvault.keenetic.net/ki_rb/ki_rb_draft_4.03.C.6.3-9.bin'
+          probe 'official_ki_rb_3.05.C.10.0-0.zip' 'https://archive.keenetic.ru/files/Keenetic_Extra_II_3.05.C.10.0-0.zip'
+          {
+            echo '## SDK facts'
+            echo
+            echo '- SDK tag: https://github.com/keenetic/keenetic-sdk/tree/5.01.C.8.0-2'
+            echo '- Verified: no native ki_rb target in SDK 5.01; KN-1713 has another hardware ID.'
+            echo '- Do not flash a hybrid 5.x image without board-specific validation.'
+          } >> "$R"
+          cat "$R" >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit text-only report
+        shell: bash
+        run: |
+          set -e
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add keenetic-extra-ii/reports/donor-probe.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'docs(extra2): record donor availability and structure checks'
+            git push origin HEAD:main
+          fi
