@@ -1,0 +1,5 @@
+# AUPE v0.5.70 adapter boundary compile ONLY. No complete module here:
+# modpost would have unresolved aupe_rs_peer_* references without a native
+# Rust-for-Linux object built against exactly the target CONFIG_RUST kernel.
+ccflags-y += -I$(src)/../include -I$(src)/../c-baseline/include -Werror
+obj-m += aupe_rs_linux_owner.o

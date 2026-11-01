@@ -1,0 +1,29 @@
+name: Delete AUPE 0.5.70 transferred Rust library Artifact
+on:
+  push:
+    branches:
+      - aupe/0.5.70-linux-rust-bridge
+    paths:
+      - .github/aupe070-artifact-cleanup/request.txt
+permissions:
+  contents: read
+  actions: write
+jobs:
+  delete-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Delete exactly the already downloaded artifact ID
+        run: |
+          set -euo pipefail
+          id="$(cat .github/aupe070-artifact-cleanup/request.txt)"
+          [[ "$id" =~ ^[0-9]{8,15}$ ]] || exit 2
+          name="$(gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$id" --jq .name)"
+          [[ "$name" == aupe-070-rust-staticlib-temp-20261101 ]] || exit 3
+          gh api --method DELETE "/repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          echo "AUPE070_ARTIFACT_DELETED=$id"
