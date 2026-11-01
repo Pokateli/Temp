@@ -26,12 +26,17 @@ done
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-ARCHIVE="wstunnel_$VERSION\_$TARGET.tar.gz"
+ARCHIVE="wstunnel_${VERSION}_${TARGET}.tar.gz"
 URL="https://github.com/erebe/wstunnel/releases/download/v$VERSION/$ARCHIVE"
 
-echo "Downloading $URL"
-curl --fail --location --silent --show-error --retry 3 --proto '=https' --proto-redir '=https' \
-  --output "$TMP/archive.tar.gz" "$URL"
+if [[ -n "${WSTUNNEL_ARCHIVE:-}" ]]; then
+  [[ -f "$WSTUNNEL_ARCHIVE" ]] || { echo "Archive not found: $WSTUNNEL_ARCHIVE" >&2; exit 2; }
+  cp "$WSTUNNEL_ARCHIVE" "$TMP/archive.tar.gz"
+else
+  echo "Downloading $URL"
+  curl --fail --location --silent --show-error --retry 3 --proto '=https' --proto-redir '=https' \
+    --output "$TMP/archive.tar.gz" "$URL"
+fi
 
 printf '%s  %s\n' "$EXPECTED" "$TMP/archive.tar.gz" | sha256sum --check --status || {
   echo "SHA256 mismatch: refusing to install" >&2
