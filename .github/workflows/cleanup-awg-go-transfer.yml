@@ -1,0 +1,30 @@
+name: Remove downloaded AWG-go transfer artifact
+on:
+  push:
+    paths:
+      - 'transfer/awg-go-artifact-cleanup.txt'
+permissions:
+  actions: write
+  contents: read
+jobs:
+  delete:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete only requested, verified artifact IDs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          while IFS= read -r ID; do
+            [[ "$ID" =~ ^[0-9]+$ ]] || continue
+            META="$(gh api "repos/$GH_REPO/actions/artifacts/$ID" --jq '[.id,.name] | @tsv')"
+            IFS=$'\t' read -r ACTUAL_ID NAME <<< "$META"
+            [[ "$ACTUAL_ID" == "$ID" ]]
+            [[ "$NAME" == awg-go-v3-offline-* ]] || { echo "Refusing unexpected artifact: $NAME"; exit 1; }
+            gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$ID"
+            echo "Deleted Actions artifact $ID ($NAME)"
+          done < transfer/awg-go-artifact-cleanup.txt
