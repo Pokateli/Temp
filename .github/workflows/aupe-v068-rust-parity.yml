@@ -1,0 +1,68 @@
+name: AUPE v0.5.68 Rust parity + Debian13 VM (no artifacts)
+on:
+  push:
+    branches: [aupe/0.5.68-rust-parity]
+    paths:
+      - .github/workflows/aupe-v068-rust-parity.yml
+      - aupe-lab/v068-rust-parity/**
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rust-parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinned Rust 1.89 from official rustup (no caches or artifacts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          rustc --version
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v068-rust-parity
+          cargo test --offline --locked --manifest-path rust/Cargo.toml --release
+      - name: All C 0.5.66 suites linked entirely to Rust via C ABI (GCC)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v068-rust-parity
+          CC=gcc bash scripts/run_ffi_diff.sh
+      - name: All C suites linked to Rust via C ABI (Clang)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v068-rust-parity
+          CC=clang bash scripts/run_ffi_diff.sh
+  debian13-vm:
+    needs: rust-parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: QEMU tools and pinned Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-system-x86 qemu-utils dosfstools mtools
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+      - name: Build standalone Rust Debian 13 smoke binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v068-rust-parity
+          export CARGO_TARGET_DIR="$PWD/build/cargo"
+          cargo build --offline --locked --release --manifest-path rust/Cargo.toml --bin vm_smoke
+      - name: Boot isolated VM-Fabric Debian 13 and verify Rust RX
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v068-rust-parity
+          bash vm/vm-fabric.sh
