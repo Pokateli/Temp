@@ -1,0 +1,18 @@
+{
+  "project": "fluge-wstunnel-wg-over-wss",
+  "upstream": "https://github.com/erebe/wstunnel",
+  "release": "v11.1.0",
+  "published_at": "2026-10-19T18:32:15Z",
+  "license": "BSD-3-Clause",
+  "artifacts": {
+    "linux_amd64": {
+      "file": "wstunnel_11.1.0_linux_amd64.tar.gz",
+      "sha256": "512edf4e7bb64fc133522220123514868fae75b5bae4124b53e396787276aa23"
+    },
+    "linux_arm64": {
+      "file": "wstunnel_11.1.0_linux_arm64.tar.gz",
+      "sha256": "148895f957a68be39e2b65d28c5f2065b9c58c4a0cfd48c560b2b3267f398464"
+    }
+  },
+  "validation": "GitHub release asset digest; installer verifies sha256 before extraction"
+}
