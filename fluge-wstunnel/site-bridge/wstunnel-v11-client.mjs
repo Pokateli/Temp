@@ -2,6 +2,8 @@
 // No Node-only dependencies. This does not create a TUN or expose MCP as a socket.
 const SECRET_PREFIX = 'authorization.bearer.';
 const MAX_DATAGRAM = 65507;
+const MAX_RECEIVE_QUEUE = 256;
+const MAX_SEND_BUFFER_BYTES = 2 * 1024 * 1024;
 function base64url(bytes) {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
   let output = '';
@@ -78,7 +80,8 @@ export async function openWstunnel({ endpoint, destinationHost, destinationPort,
         Promise.reject(new Error('Nonbinary frame received'))));
     promise.then(packet => {
       if (waiters.length) waiters.shift().resolve(packet);
-      else incoming.push(packet);
+      else if (incoming.length < MAX_RECEIVE_QUEUE) incoming.push(packet);
+      else { closeError = new Error('Receive queue overflow'); ws.close(1009, 'buffer full'); }
     }).catch(err => {
       closeError = err;
       ws.close(1003, 'binary required');
@@ -106,6 +109,7 @@ export async function openWstunnel({ endpoint, destinationHost, destinationPort,
       if (closed || ws.readyState !== 1) throw new Error('Tunnel not open');
       const bytes = packet instanceof Uint8Array ? packet : new Uint8Array(packet);
       if (!bytes.length || bytes.length > MAX_DATAGRAM) throw new Error('Invalid packet length');
+      if (ws.bufferedAmount > MAX_SEND_BUFFER_BYTES) throw new Error('Backpressure: send queue full');
       ws.send(bytes);
     },
     receive,
