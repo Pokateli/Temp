@@ -4,6 +4,10 @@
 
 **Статус: лабораторный комплект.** Код интеграции подготовлен, но реальное соединение ChatGPT → MCP → хост этим коммитом не устанавливается: MCP-клиент чата не предоставляет файловый дескриптор TCP/WebSocket сетевому процессу песочницы.
 
+JS-клиент и WSS echo-диагностика: [site-bridge/README.md](site-bridge/README.md).
+
+Локальный тест WSS/TLS с проверкой временного сертификата (без GitHub Actions): `bash tests/run-local.sh` (Node.js 22+, Python `websockets` 14+, OpenSSL).
+
 Анализ совместимости Site: [SITE_COMPATIBILITY.md](SITE_COMPATIBILITY.md).
 
 ## Закреплённая зависимость
