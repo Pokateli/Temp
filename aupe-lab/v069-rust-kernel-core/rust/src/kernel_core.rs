@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(epoch,1);
         assert_eq!(unsafe{aupe_rs_peer_install(&mut*p,[7u8;32].as_ptr(),r1,101,&mut epoch)},0);
         assert_eq!(epoch,1);
-        let packet=ipv4();let mut scratch=vec![0u8;65535];let mut got=vec![];
+        let packet=ipv4();let mut scratch=vec![0u8;65535];let mut got:Vec<u8>=vec![];
         let r=unsafe{aupe_rs_peer_verified_rx(&mut*p,r1,11,102,packet.as_ptr(),28,
                  scratch.as_mut_ptr(),65535,Some(sink),&mut got as *mut _ as *mut c_void)};
         assert_eq!(r,2);assert_eq!(got,packet);
