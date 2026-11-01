@@ -1,0 +1,24 @@
+name: AUPE 0.5.68 Rust no_std compile check (no artifacts)
+on:
+  push:
+    branches: [aupe/0.5.68-rust-parity]
+    paths:
+      - .github/workflows/aupe-v068-rust-nostd.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nostd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust 1.89.0
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+      - name: Check Rust core without std and external Cargo dependencies
+        run: |
+          set -euo pipefail
+          cargo check --offline --locked --manifest-path aupe-lab/v068-rust-parity/rust/Cargo.toml --no-default-features --lib
