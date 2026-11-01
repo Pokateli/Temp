@@ -1,0 +1,40 @@
+name: AUPE 0.5.67 C vs Rust (Temp dependency transport)
+on:
+  push:
+    branches:
+      - aupe/0.5.67-rust-compare
+    paths:
+      - .github/workflows/aupe-v067-rust-compare.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download pinned Rust compiler, no Actions artifacts or caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --fail --show-error --silent --location https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+            source "$HOME/.cargo/env"
+          fi
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          rustc --version
+          cargo --version
+      - name: C and Rust differential checks (GCC)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v067-rust-compare
+          CC=gcc AUPE_REQUIRE_RUST=1 bash tools/compare.sh
+      - name: C and Rust differential checks (Clang)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd aupe-lab/v067-rust-compare
+          CC=clang AUPE_REQUIRE_RUST=1 bash tools/compare.sh
