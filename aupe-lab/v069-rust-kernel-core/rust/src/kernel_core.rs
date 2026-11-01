@@ -43,6 +43,10 @@ pub struct KernelPeerCore {
 pub extern "C" fn aupe_rs_peer_size() -> usize {mem::size_of::<KernelPeerCore>()}
 #[unsafe(no_mangle)]
 pub extern "C" fn aupe_rs_peer_align() -> usize {mem::align_of::<KernelPeerCore>()}
+#[unsafe(no_mangle)]
+pub extern "C" fn aupe_rs_workspace_size() -> usize {mem::size_of::<AfState>()}
+#[unsafe(no_mangle)]
+pub extern "C" fn aupe_rs_workspace_align() -> usize {mem::align_of::<AfState>()}
 
 /// # Safety
 /// `p` points to an exclusive, correctly aligned allocation of `size()` bytes.
