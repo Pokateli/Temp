@@ -1,0 +1,35 @@
+name: Build Rust AUPE guest probe for local ChatGPT VM (NO GitHub VM)
+on:
+  push:
+    branches:
+      - transfer/aupe-rust-vm-smoke-local-20261101
+    paths:
+      - .github/workflows/aupe-rust-local-guest-binary.yml
+permissions:
+  contents: read
+jobs:
+  compile-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Rust 0.5.68 guest binary, do not start VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/aupe-rust-build"
+          cargo build --offline --locked --release \
+            --manifest-path aupe-lab/v068-rust-parity/rust/Cargo.toml --bin vm_smoke
+          install -Dm755 "$CARGO_TARGET_DIR/release/vm_smoke" \
+            "$RUNNER_TEMP/aupe-transfer/vm_smoke"
+          (cd "$RUNNER_TEMP/aupe-transfer" && sha256sum vm_smoke > vm_smoke.sha256)
+      - name: Transfer small guest executable temporarily
+        uses: actions/upload-artifact@v4
+        with:
+          name: aupe-rust-vm-smoke-local-20261101
+          path: ${{ runner.temp }}/aupe-transfer/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error

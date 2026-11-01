@@ -1,0 +1,30 @@
+name: Delete temporary AUPE Rust guest binary Artifact
+on:
+  push:
+    branches:
+      - transfer/aupe-rust-vm-smoke-local-20261101
+    paths:
+      - .github/aupe-rust-cleanup/request.txt
+permissions:
+  contents: read
+  actions: write
+jobs:
+  delete-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Delete temporary Rust file Artifact by exact ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          id="$(cat .github/aupe-rust-cleanup/request.txt)"
+          [[ "$id" =~ ^[0-9]{8,15}$ ]] || exit 2
+          name="$(gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$id" --jq .name)"
+          [[ "$name" == 'aupe-rust-vm-smoke-local-20261101' ]] || exit 3
+          gh api --method DELETE "/repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          echo "DELETED_RUST_ARTIFACT=$id"
