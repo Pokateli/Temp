@@ -1,0 +1,32 @@
+name: AUPE 0.5.69 compile guest binary for LOCAL VM only (no GitHub VM)
+on:
+  push:
+    branches: [aupe/0.5.69-rust-kernel-core]
+    paths:
+      - .github/workflows/aupe-069-binary-transfer.yml
+permissions:
+  contents: read
+jobs:
+  build-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build local guest Rust binary (NO VM)
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/aupe-069-build"
+          cargo build --offline --locked --release --manifest-path aupe-lab/v069-rust-kernel-core/rust/Cargo.toml --bin kernel_smoke
+          mkdir -p "$RUNNER_TEMP/aupe-069-share"
+          cp "$CARGO_TARGET_DIR/release/kernel_smoke" "$RUNNER_TEMP/aupe-069-share/aupe069_kernel_smoke"
+          (cd "$RUNNER_TEMP/aupe-069-share" && sha256sum aupe069_kernel_smoke > aupe069_kernel_smoke.sha256)
+      - name: Upload tiny temporary executable (delete immediately after local import)
+        uses: actions/upload-artifact@v4
+        with:
+          name: aupe-069-local-smoke-transfer-20261101
+          path: ${{ runner.temp }}/aupe-069-share/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error

@@ -1,0 +1,28 @@
+name: Delete AUPE 0.5.69 temporary local-VM binary Artifact
+on:
+  push:
+    branches: [aupe/0.5.69-rust-kernel-core]
+    paths:
+      - .github/aupe069-artifact-cleanup/request.txt
+permissions:
+  contents: read
+  actions: write
+jobs:
+  delete-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Delete exact downloaded artifact
+        run: |
+          set -euo pipefail
+          id="$(cat .github/aupe069-artifact-cleanup/request.txt)"
+          [[ "$id" =~ ^[0-9]{8,15}$ ]] || exit 2
+          name="$(gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/$id" --jq .name)"
+          [[ "$name" == 'aupe-069-local-smoke-transfer-20261101' ]] || exit 3
+          gh api --method DELETE "/repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          echo "AUPE069_ARTIFACT_DELETED=$id"
