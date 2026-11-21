@@ -1,0 +1,30 @@
+name: AUPE 0.9.186 React preview artifact for Drive
+on:
+  push:
+    paths:
+      - .github/workflows/aupe-react-preview-186.yml
+      - aupe-react-preview/0.9.186/react-static-zip.base64
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode checked React 0.9.186 preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          base64 --decode aupe-react-preview/0.9.186/react-static-zip.base64 > out/AUPE-Manager-0.9.186-React-Preview-Static.zip
+          echo '9471e32812d60b4e092bfd0bd3148a3457958415c113f2bdc5847e0f9e90f2be  out/AUPE-Manager-0.9.186-React-Preview-Static.zip' | sha256sum -c -
+          unzip -t out/AUPE-Manager-0.9.186-React-Preview-Static.zip | tail -1
+          (cd out && sha256sum AUPE-Manager-0.9.186-React-Preview-Static.zip > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aupe-0.9.186-react-preview-for-drive
+          path: out/
+          compression-level: 0
+          retention-days: 30
